@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+#
+# codex-hud - Wrapper script for Codex CLI with HUD display
+# Launches Codex in a tmux session with a status bar pane
+#
+
+set -e
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HUD_DIR="$(dirname "$SCRIPT_DIR")"
+SESSION_NAME="codex-hud-$$"
+HUD_HEIGHT=3  # Height of the HUD pane in lines
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Print error message and exit
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+# Print warning message
+warn() {
+    echo -e "${YELLOW}Warning:${NC} $1" >&2
+}
+
+# Print info message
+info() {
+    echo -e "${GREEN}Info:${NC} $1"
+}
+
+# Check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check dependencies
+check_dependencies() {
+    if ! command_exists tmux; then
+        error "tmux is required but not installed.
+
+Install tmux:
+  Linux (Debian/Ubuntu): sudo apt install tmux
+  Linux (RHEL/CentOS):   sudo yum install tmux
+  macOS:                 brew install tmux"
+    fi
+    
+    if ! command_exists codex; then
+        error "codex CLI is not found in PATH.
+
+Install Codex CLI from: https://github.com/openai/codex"
+    fi
+    
+    if ! command_exists node; then
+        error "Node.js is required but not installed.
+
+Install Node.js 18+ from: https://nodejs.org/"
+    fi
+}
+
+# Build the HUD renderer if needed
+build_hud() {
+    local dist_file="$HUD_DIR/dist/index.js"
+    local src_file="$HUD_DIR/src/index.ts"
+    
+    # Check if we need to build
+    if [[ ! -f "$dist_file" ]] || [[ "$src_file" -nt "$dist_file" ]]; then
+        info "Building HUD renderer..."
+        (cd "$HUD_DIR" && npm run build) || error "Failed to build HUD renderer"
+    fi
+}
+
+# Get the current working directory for Codex
+get_cwd() {
+    pwd
+}
+
+# Cleanup function
+cleanup() {
+    # Kill the tmux session if it exists
+    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+    fi
+}
+
+# Main function
+main() {
+    # Parse arguments
+    local codex_args=("$@")
+    
+    # Check dependencies
+    check_dependencies
+    
+    # Build HUD if needed
+    build_hud
+    
+    # Set up cleanup trap
+    trap cleanup EXIT
+    
+    # Get current working directory
+    local cwd
+    cwd=$(get_cwd)
+    
+    # Calculate terminal dimensions
+    local term_height
+    local term_width
+    term_height=$(tput lines 2>/dev/null || echo 24)
+    term_width=$(tput cols 2>/dev/null || echo 80)
+    
+    # Calculate HUD pane percentage (aim for HUD_HEIGHT lines)
+    local hud_percent=$((HUD_HEIGHT * 100 / term_height))
+    # Ensure minimum 5% and maximum 20%
+    if [[ $hud_percent -lt 5 ]]; then
+        hud_percent=5
+    elif [[ $hud_percent -gt 20 ]]; then
+        hud_percent=20
+    fi
+    
+    # Create tmux session with Codex in the main pane
+    info "Starting Codex with HUD..."
+    
+    # Build the codex command string
+    local codex_cmd="codex"
+    if [[ ${#codex_args[@]} -gt 0 ]]; then
+        codex_cmd="codex ${codex_args[*]}"
+    fi
+    
+    # Create new detached session
+    tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    
+    # Send the codex command to the main pane
+    tmux send-keys -t "$SESSION_NAME" "cd '$cwd' && $codex_cmd" C-m
+    
+    # Wait a moment for the session to be ready
+    sleep 0.2
+    
+    # Split the window horizontally (create bottom pane for HUD)
+    tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" \
+        "cd '$cwd' && CODEX_HUD_CWD='$cwd' node '$HUD_DIR/dist/index.js'"
+    
+    # Select the top pane (Codex) - pane 1 is the original, pane 2 is the new split
+    tmux select-pane -t "$SESSION_NAME:.1"
+    
+    # Attach to the session
+    tmux attach-session -t "$SESSION_NAME"
+}
+
+# Show help
+show_help() {
+    cat << EOF
+codex-hud - Codex CLI with HUD display
+
+Usage: codex-hud [codex options...]
+
+This wrapper launches Codex in a tmux session with a real-time status bar
+showing model info, git status, project info, and more.
+
+All arguments are passed through to the codex command.
+
+Requirements:
+  - tmux
+  - Node.js 18+
+  - Codex CLI
+
+Examples:
+  codex-hud                    Start Codex with HUD
+  codex-hud --model gpt-5      Start with specific model
+  codex-hud "help me debug"    Start with initial prompt
+
+For more information, see: https://github.com/openai/codex
+EOF
+}
+
+# Check for help flag
+case "${1:-}" in
+    -h|--help)
+        show_help
+        exit 0
+        ;;
+esac
+
+# Run main
+main "$@"

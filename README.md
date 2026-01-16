@@ -1,3 +1,8 @@
+<p align="center">
+  <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
+  <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
+</p>
+
 # Codex HUD
 
 Real-time statusline HUD for OpenAI Codex CLI.

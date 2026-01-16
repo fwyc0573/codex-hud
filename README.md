@@ -17,6 +17,18 @@ cd codex-hud
 
 That's it! After installation, typing `codex` will automatically launch with the HUD display.
 
+
+## Display Format
+
+```
+[gpt-5.2:medium] ░░░░░░░░░░░░ 100% left ⏱️  28m @openai
+codex-hud git:(v0.5 *) !1 ?1 | 3 cfg | Appr:on-req
+Tokens: 39.1K (38.6K in, 29.7K cache, 556 out) | Ctx: 100% left (8.4K/258.4K)
+Dir: ...ethanfeng/Documents/GitHub/codex-hud | Session: 019bc7f3...
+◑ exec_command | ✓ exec_command ×9 | (11 total)
+```
+
+
 ## Features
 
 ### Phase 1 (Basic)
@@ -107,20 +119,6 @@ This will:
 - Kill any running codex-hud sessions
 - Show location of backed-up original alias (if any)
 
-## Usage
-
-After installation, just use `codex` as you normally would:
-
-```bash
-# Basic usage - HUD appears automatically
-codex
-
-# With arguments (passed to codex)
-codex --model gpt-5
-
-# With initial prompt
-codex "help me debug this"
-```
 
 ### Additional Commands
 
@@ -156,38 +154,6 @@ CODEX_HUD_HEIGHT=5 codex
 # Bypass HUD and run original Codex
 CODEX_HUD_BYPASS=1 codex
 ```
-
-## Display Format
-
-The wrapper uses tmux by default and creates a fresh session for each `codex` launch (unless you set `CODEX_HUD_SESSION_MODE=shared`).
-
-The wrapper creates a tmux session with:
-- **Main pane** (90%): Codex CLI
-- **HUD pane** (10%): Status bar
-
-```
-[gpt-5.2-codex] │ my-project git:(main) ● │ ⏱️ 12m │ 🎫 ████░░░░ 50.2K/12.5K
-MCP: 3 │ Approval: on-req │ AGENTS.md: 2
-Tools: ✓ 15 (234 total)
-```
-
-### Line 1: Header
-- `[model-name]` - Current model
-- `project-name` - Current directory name
-- `git:(branch)` - Git branch (if in repo)
-- `●` - Dirty indicator (uncommitted changes)
-- `⏱️ duration` - Session duration
-- `🎫 progress input/output` - Token usage with progress bar
-
-### Line 2: Details
-- `MCP: N` - Number of enabled MCP servers
-- `Approval: policy` - Approval policy
-- `AGENTS.md: N` - Count of AGENTS.md files
-- `Sandbox: mode` - Sandbox mode (if configured)
-
-### Line 3: Activity
-- `Tools: ✓ N` - Recent tool calls (completed)
-- `(N total)` - Total tool calls in session
 
 ## Configuration
 

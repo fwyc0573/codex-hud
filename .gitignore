@@ -37,6 +37,6 @@ coverage/
 .env.*.local
 
 .kiro/
-doc/
+docs/
 tests/
 CLAUDE.md

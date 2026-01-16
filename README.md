@@ -4,6 +4,19 @@ Real-time statusline HUD for OpenAI Codex CLI.
 
 > **Note**: This is a wrapper tool that runs alongside Codex CLI, inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.
 
+## Quick Start (One Command Install)
+
+```bash
+# Clone and install
+git clone https://github.com/your-repo/codex-hud.git
+cd codex-hud
+./install.sh
+
+# Now just type 'codex' - HUD appears automatically!
+```
+
+That's it! After installation, typing `codex` will automatically launch with the HUD display.
+
 ## Features
 
 ### Phase 1 (Basic)
@@ -31,13 +44,39 @@ Real-time statusline HUD for OpenAI Codex CLI.
   - Searches `~/.codex/sessions/` directory structure
   - Prioritizes recently modified sessions
 
+### Phase 3 (Seamless Integration) ✨ NEW
+- **Automatic tmux Installation**: Installs tmux if not present
+- **Shell Alias Integration**: `codex` command automatically launches with HUD
+- **Session Reuse**: Same directory reuses existing tmux session
+- **Configurable HUD Position**: Top or bottom (environment variable)
+- **One-Command Install/Uninstall**: Simple setup and removal
+
 ## Requirements
 
 - **Node.js** 18+
-- **tmux** (for split-pane display)
 - **OpenAI Codex CLI** installed and in PATH
+- **tmux** (auto-installed if missing)
 
 ## Installation
+
+### Recommended: Automatic Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-repo/codex-hud.git
+cd codex-hud
+
+# Run the installer
+./install.sh
+```
+
+The installer will:
+1. Install Node.js dependencies
+2. Build the TypeScript project
+3. Add a shell alias so `codex` → `codex-hud`
+4. Prompt to install tmux if not present
+
+### Manual Installation
 
 ```bash
 # Clone or download this repository
@@ -52,30 +91,72 @@ npm run build
 # Make the wrapper executable
 chmod +x bin/codex-hud
 
-# (Optional) Add to PATH
-export PATH="$PATH:$(pwd)/bin"
+# Add alias to your shell config (~/.bashrc or ~/.zshrc)
+echo "alias codex='/path/to/codex-hud/bin/codex-hud'" >> ~/.bashrc
+source ~/.bashrc
 ```
+
+## Uninstallation
+
+```bash
+./uninstall.sh
+```
+
+This will:
+- Remove the shell alias
+- Kill any running codex-hud sessions
+- Show location of backed-up original alias (if any)
 
 ## Usage
 
-Instead of running `codex` directly, use the wrapper:
+After installation, just use `codex` as you normally would:
 
 ```bash
-# Basic usage
-./bin/codex-hud
+# Basic usage - HUD appears automatically
+codex
 
 # With arguments (passed to codex)
-./bin/codex-hud --model gpt-5
+codex --model gpt-5
 
 # With initial prompt
-./bin/codex-hud "help me debug this"
+codex "help me debug this"
 ```
 
-The wrapper creates a tmux session with:
-- **Top pane** (90%): Codex CLI
-- **Bottom pane** (10%): HUD status bar
+### Additional Commands
+
+```bash
+# Kill existing session for current directory
+codex-hud --kill
+
+# List all codex-hud sessions
+codex-hud --list
+
+# Show help
+codex-hud --help
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CODEX_HUD_POSITION` | HUD pane position: `bottom`, `top` | `bottom` |
+| `CODEX_HUD_HEIGHT` | HUD pane height in lines | `3` |
+| `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
+
+Example:
+```bash
+# Put HUD on top
+CODEX_HUD_POSITION=top codex
+
+# Taller HUD
+CODEX_HUD_HEIGHT=5 codex
+```
 
 ## Display Format
+
+The wrapper creates a tmux session with:
+- **Main pane** (90%): Codex CLI
+- **HUD pane** (10%): Status bar
 
 ```
 [gpt-5.2-codex] │ my-project git:(main) ● │ ⏱️ 12m │ 🎫 ████░░░░ 50.2K/12.5K

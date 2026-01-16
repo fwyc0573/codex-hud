@@ -1,6 +1,7 @@
 /**
  * Usage Line Renderer
- * Renders: ⏱️ 10m (session duration and other usage info)
+ * Now simplified - duration moved to identity line (claude-hud style)
+ * This file kept for backward compatibility
  */
 
 import type { HudData, LayoutConfig } from '../../types.js';
@@ -26,14 +27,19 @@ function formatDuration(startTime: Date): string {
 }
 
 /**
- * Render the usage line
- * Format: ⏱️ 10m
+ * Render the usage line (legacy - duration now in identity line)
+ * Returns null in new layout since duration is in identity line
  */
-export function renderUsageLine(data: HudData, layout: LayoutConfig): string | null {
-  if (!layout.showDuration) {
-    return null;
-  }
-  
+export function renderUsageLine(_data: HudData, _layout: LayoutConfig): string | null {
+  // Duration is now rendered in identity line (claude-hud style)
+  // This function returns null to avoid duplicate display
+  return null;
+}
+
+/**
+ * Render standalone duration (for compact mode or other uses)
+ */
+export function renderDuration(data: HudData): string {
   const duration = formatDuration(data.sessionStart);
   return colors.dim(`${icons.clock} ${duration}`);
 }

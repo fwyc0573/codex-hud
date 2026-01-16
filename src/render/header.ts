@@ -2,21 +2,22 @@
  * Header line renderer
  * Phase 3: Redesigned to match claude-hud layout
  * 
- * Layout:
- * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
- * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
- * Row 3 (optional): ◐ Edit: file.ts | ✓ Read ×3
+ * Layout (claude-hud style):
+ * Row 1: [Model] ███████░░░ 70% | ⏱️ 12m
+ * Row 2: project-name git:(branch * ↑1 ↓2) !3 +1 ?2
+ * Row 3: 2 AGENTS.md | 3 rules | 2 MCPs | Approval: on-req | Sandbox: ws-write
+ * Row 4+: Status lines (provider, directory, account, session, tokens, limits)
+ * Row N+: Activity lines (tools, todos)
  */
 
 import type { HudData, RenderOptions, LayoutConfig } from '../types.js';
 import { DEFAULT_LAYOUT } from '../types.js';
-import { colors, theme, icons } from './colors.js';
+import { colors, theme } from './colors.js';
 import {
   renderIdentityLine,
   renderProjectLine,
-  renderEnvironmentLine,
-  renderUsageLine,
   collectActivityLines,
+  collectStatusLines,
 } from './lines/index.js';
 
 /**
@@ -25,61 +26,47 @@ import {
  */
 function renderCompactLayout(data: HudData, layout: LayoutConfig): string[] {
   const parts: string[] = [];
-  
-  // Identity (model + context bar)
+
+  // Identity (model + context bar + duration)
   parts.push(renderIdentityLine(data, layout));
-  
+
   // Project + git
   parts.push(renderProjectLine(data));
-  
+
   // Quick stats (just MCP count)
   const mcpCount = data.project.mcpCount;
   if (mcpCount > 0) {
     parts.push(theme.info(`${mcpCount}`) + colors.dim(' MCPs'));
   }
-  
-  // Duration
-  const usageLine = renderUsageLine(data, layout);
-  if (usageLine) {
-    parts.push(usageLine);
-  }
-  
-  const separator = layout.showSeparators ? theme.separator(' │ ') : ' ';
+
+  const separator = layout.showSeparators ? theme.separator(' | ') : ' | ';
   return [parts.join(separator)];
 }
 
 /**
- * Render the expanded layout (multiple lines)
- * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
- * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
- * Row 3+: Activity lines (tools, todos)
+ * Render the expanded layout (multiple lines) - compact version
+ * Row 1: [Model] ████████ 70% ⏱️ 12m
+ * Row 2: project git:(branch *) !3 ?2 | 2 cfg | Appr:on-req
+ * Row 3: Tokens: 12.5K (in: 10K, cache: 2K, out: 2.5K) | Ctx: 70%/128K
+ * Row 4+: Activity lines (tools, todos) - only if present
  */
 function renderExpandedLayout(data: HudData, layout: LayoutConfig): string[] {
   const lines: string[] = [];
-  
-  // Row 1: Identity | Project | Duration
-  const row1Parts: string[] = [];
-  row1Parts.push(renderIdentityLine(data, layout));
-  row1Parts.push(renderProjectLine(data));
-  
-  const usageLine = renderUsageLine(data, layout);
-  if (usageLine) {
-    row1Parts.push(usageLine);
-  }
-  
-  const separator = layout.showSeparators ? theme.separator(' │ ') : ' ';
-  lines.push(row1Parts.join(separator));
-  
-  // Row 2: Environment line
-  const envLine = renderEnvironmentLine(data);
-  if (envLine) {
-    lines.push(envLine);
-  }
-  
-  // Row 3+: Activity lines (tools, todos)
+
+  // Row 1: Identity line (Model + context bar + duration)
+  lines.push(renderIdentityLine(data, layout));
+
+  // Row 2: Project line (project name + git status + compact env)
+  lines.push(renderProjectLine(data));
+
+  // Row 3: Token line (compact token usage + context)
+  const statusLines = collectStatusLines(data);
+  lines.push(...statusLines);
+
+  // Row 4+: Activity lines (tools, todos) - only if present
   const activityLines = collectActivityLines(data);
   lines.push(...activityLines);
-  
+
   return lines;
 }
 
@@ -88,11 +75,11 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig): string[] {
  */
 export function renderHud(data: HudData, options: RenderOptions): string[] {
   const layout = options.layout ?? DEFAULT_LAYOUT;
-  
+
   if (layout.mode === 'compact') {
     return renderCompactLayout(data, layout);
   }
-  
+
   return renderExpandedLayout(data, layout);
 }
 

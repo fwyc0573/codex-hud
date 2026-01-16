@@ -15,6 +15,19 @@ export interface SessionFile {
   modifiedAt: Date;
 }
 
+interface SessionMetaInfo {
+  id: string;
+  cwd: string;
+  timestamp: Date;
+}
+
+interface HudSessionFilter {
+  cwd: string | null;
+  startTime: Date | null;
+}
+
+const META_CACHE = new Map<string, { mtimeMs: number; size: number; meta: SessionMetaInfo | null }>();
+
 /**
  * Get the Codex home directory
  */
@@ -27,6 +40,163 @@ export function getCodexHome(): string {
  */
 export function getSessionsDir(): string {
   return path.join(getCodexHome(), 'sessions');
+}
+
+function parseHudSessionStart(value: string): Date | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const numeric = Number(trimmed);
+  if (!Number.isNaN(numeric)) {
+    // Treat 10-digit values as seconds, otherwise milliseconds.
+    const millis = trimmed.length <= 10 ? numeric * 1000 : numeric;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getHudSessionFilter(): HudSessionFilter {
+  return {
+    cwd: process.env.CODEX_HUD_CWD ?? null,
+    startTime: process.env.CODEX_HUD_SESSION_START
+      ? parseHudSessionStart(process.env.CODEX_HUD_SESSION_START)
+      : null,
+  };
+}
+
+export function isHudSessionScoped(): boolean {
+  const filter = getHudSessionFilter();
+  return Boolean(filter.cwd || filter.startTime);
+}
+
+function readSessionMeta(rolloutPath: string): SessionMetaInfo | null {
+  try {
+    const stats = fs.statSync(rolloutPath);
+    const cached = META_CACHE.get(rolloutPath);
+    if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+      return cached.meta;
+    }
+
+    const fd = fs.openSync(rolloutPath, 'r');
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      const chunk = buffer.toString('utf8', 0, bytesRead);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as { type?: string; payload?: Record<string, unknown>; timestamp?: string };
+          if (entry.type !== 'session_meta' || !entry.payload) {
+            continue;
+          }
+          const payload = entry.payload as { id?: string; cwd?: string; timestamp?: string };
+          const timestampStr = payload.timestamp ?? entry.timestamp ?? '';
+          const timestamp = new Date(timestampStr);
+          if (!payload.id || !payload.cwd || Number.isNaN(timestamp.getTime())) {
+            continue;
+          }
+          const meta = { id: payload.id, cwd: payload.cwd, timestamp };
+          META_CACHE.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, meta });
+          return meta;
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    META_CACHE.set(rolloutPath, { mtimeMs: stats.mtimeMs, size: stats.size, meta: null });
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function hasRolloutEntryAfter(rolloutPath: string, cutoffMillis: number): boolean {
+  try {
+    const stats = fs.statSync(rolloutPath);
+    const readSize = Math.min(stats.size, 64 * 1024);
+    const start = Math.max(0, stats.size - readSize);
+    const fd = fs.openSync(rolloutPath, 'r');
+    try {
+      const buffer = Buffer.alloc(readSize);
+      const bytesRead = fs.readSync(fd, buffer, 0, readSize, start);
+      const chunk = buffer.toString('utf8', 0, bytesRead);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as { timestamp?: string };
+          if (!entry.timestamp) continue;
+          const ts = new Date(entry.timestamp);
+          if (!Number.isNaN(ts.getTime()) && ts.getTime() >= cutoffMillis) {
+            return true;
+          }
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    // Ignore IO errors
+  }
+
+  return false;
+}
+
+function applyHudFilter(sessions: SessionFile[]): SessionFile[] {
+  const filter = getHudSessionFilter();
+  if (!filter.cwd && !filter.startTime) {
+    return sessions;
+  }
+
+  const startMillis = filter.startTime ? filter.startTime.getTime() : null;
+  const cutoffMillis = startMillis !== null ? startMillis - 2000 : null;
+
+  const strictMatches = sessions.filter((session) => {
+    const meta = readSessionMeta(session.path);
+    if (!meta) {
+      return false;
+    }
+    if (filter.cwd && meta.cwd !== filter.cwd) {
+      return false;
+    }
+    if (cutoffMillis !== null && meta.timestamp.getTime() < cutoffMillis) {
+      return false;
+    }
+    return true;
+  });
+
+  if (strictMatches.length > 0 || cutoffMillis === null) {
+    return strictMatches;
+  }
+
+  // If no strict matches, allow active sessions that have entries after the HUD start.
+  // This supports /resume pointing at older rollout files that are being appended now.
+  const resumeCandidates = sessions.filter((session) => {
+    const meta = readSessionMeta(session.path);
+    if (!meta) {
+      return false;
+    }
+    if (filter.cwd && meta.cwd !== filter.cwd) {
+      return false;
+    }
+    return hasRolloutEntryAfter(session.path, cutoffMillis);
+  });
+  // Avoid switching when multiple candidates are active in the same cwd.
+  if (resumeCandidates.length === 1) {
+    return resumeCandidates;
+  }
+  return [];
 }
 
 /**
@@ -129,6 +299,8 @@ export function findMostRecentRollout(maxDaysBack: number = 7): SessionFile | nu
     allSessions = allSessions.concat(rolloutsInDay);
   }
 
+  allSessions = applyHudFilter(allSessions);
+
   if (allSessions.length === 0) {
     return null;
   }
@@ -159,7 +331,7 @@ export function findActiveRollouts(withinSeconds: number = 60): SessionFile[] {
   const day = now.getDate().toString().padStart(2, '0');
 
   const todayDir = path.join(sessionsDir, year, month, day);
-  const rolloutsToday = findRolloutsInDir(todayDir);
+  const rolloutsToday = applyHudFilter(findRolloutsInDir(todayDir));
 
   // Filter to recently modified
   return rolloutsToday

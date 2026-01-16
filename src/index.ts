@@ -3,7 +3,7 @@
  * Phase 3: Redesigned with claude-hud style rendering
  */
 
-import { readCodexConfig } from './collectors/codex-config.js';
+import { readCodexConfig, checkAccountStatus } from './collectors/codex-config.js';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
 import { SessionFinder } from './collectors/session-finder.js';
@@ -11,6 +11,7 @@ import { RolloutParser } from './collectors/rollout.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
 import type { HudData } from './types.js';
+import { BASELINE_TOKENS } from './types.js';
 
 // Session start time
 const SESSION_START = new Date();
@@ -71,22 +72,122 @@ async function collectData(): Promise<HudData> {
   }
 
   // Build context usage from token usage if available
+  // IMPORTANT: Use the official Codex CLI calculation method:
+  // - Use last_token_usage.total_tokens as the context window occupancy
+  // - Subtract BASELINE_TOKENS (12000) from both window and usage
+  // - Calculate "context left" percentage, not "context used"
   let contextUsage = undefined;
-  if (rolloutData?.tokenUsage?.total_token_usage) {
-    const tu = rolloutData.tokenUsage.total_token_usage;
-    const total = tu.total_tokens ?? 0;
-    const contextWindow = rolloutData.tokenUsage.model_context_window ?? 0;
-    
-    if (contextWindow > 0) {
+  if (rolloutData?.tokenUsage) {
+    const tu = rolloutData.tokenUsage;
+    const contextWindow = tu.model_context_window ?? 0;
+
+    // Use last_token_usage for context window calculation (current request size)
+    const lastUsage = tu.last_token_usage;
+    const totalUsage = tu.total_token_usage;
+
+    if (contextWindow > 0 && lastUsage) {
+      // Official Codex CLI calculation uses total_tokens from last_token_usage
+      // This represents the actual tokens in the context window for the last request
+      const lastTotal = lastUsage.total_tokens ?? 0;
+      const lastInput = lastUsage.input_tokens ?? 0;
+      const lastOutput = lastUsage.output_tokens ?? 0;
+      const lastCached = lastUsage.cached_input_tokens ?? 0;
+
+      // Calculate context LEFT percentage using official Codex CLI formula:
+      // effective_window = context_window - BASELINE_TOKENS
+      // used = max(0, total_tokens - BASELINE_TOKENS)
+      // remaining = max(0, effective_window - used)
+      // context_left_percent = (remaining / effective_window) * 100
+      let contextLeftPercent = 100;
+      if (contextWindow > BASELINE_TOKENS) {
+        const effectiveWindow = contextWindow - BASELINE_TOKENS;
+        const used = Math.max(0, lastTotal - BASELINE_TOKENS);
+        const remaining = Math.max(0, effectiveWindow - used);
+        contextLeftPercent = Math.round((remaining / effectiveWindow) * 100);
+        contextLeftPercent = Math.max(0, Math.min(100, contextLeftPercent));
+      } else {
+        // Context window too small, show 0% left
+        contextLeftPercent = 0;
+      }
+
+      // Usage percent is inverse of context left (for progress bar display)
+      const usedPercent = 100 - contextLeftPercent;
+
+      // For display, show cumulative totals
+      const totalInput = totalUsage?.input_tokens ?? lastInput;
+      const totalOutput = totalUsage?.output_tokens ?? lastOutput;
+      const totalCached = totalUsage?.cached_input_tokens ?? lastCached;
+
+      contextUsage = {
+        used: lastTotal,
+        total: contextWindow,
+        percent: usedPercent,  // For progress bar (how much is used)
+        contextLeftPercent,    // Official "context left" percentage
+        inputTokens: totalInput,
+        outputTokens: totalOutput,
+        cachedTokens: totalCached,
+        // Add last request values for accurate context display
+        lastInputTokens: lastInput,
+        lastOutputTokens: lastOutput,
+        lastCachedTokens: lastCached,
+        lastTotalTokens: lastTotal,
+      };
+    } else if (contextWindow > 0 && totalUsage) {
+      // Fallback: if no last_token_usage, use total (less accurate)
+      const total = totalUsage.total_tokens ?? 0;
+      const input = totalUsage.input_tokens ?? 0;
+      const output = totalUsage.output_tokens ?? 0;
+      const cached = totalUsage.cached_input_tokens ?? 0;
+
+      // Calculate context left using total_token_usage (less accurate but better than nothing)
+      let contextLeftPercent = 100;
+      if (contextWindow > BASELINE_TOKENS) {
+        const effectiveWindow = contextWindow - BASELINE_TOKENS;
+        const used = Math.max(0, total - BASELINE_TOKENS);
+        const remaining = Math.max(0, effectiveWindow - used);
+        contextLeftPercent = Math.round((remaining / effectiveWindow) * 100);
+        contextLeftPercent = Math.max(0, Math.min(100, contextLeftPercent));
+      } else {
+        contextLeftPercent = 0;
+      }
+
+      const usedPercent = 100 - contextLeftPercent;
+
       contextUsage = {
         used: total,
         total: contextWindow,
-        percent: Math.round((total / contextWindow) * 100),
-        inputTokens: tu.input_tokens ?? 0,
-        outputTokens: tu.output_tokens ?? 0,
-        cachedTokens: tu.cached_input_tokens ?? 0,
+        percent: usedPercent,
+        contextLeftPercent,
+        inputTokens: input,
+        outputTokens: output,
+        cachedTokens: cached,
+        lastTotalTokens: total,
       };
     }
+  }
+
+  // Collect account info
+  const accountStatus = checkAccountStatus();
+  const accountInfo = {
+    type: accountStatus.type,
+    status: accountStatus.status,
+    message: accountStatus.message,
+  };
+
+  // Build limits info from rate limits
+  let limitsInfo = undefined;
+  if (rolloutData?.rateLimits) {
+    const rl = rolloutData.rateLimits;
+    limitsInfo = {
+      requestsRemaining: rl.requests_remaining,
+      tokensRemaining: rl.tokens_remaining,
+      resetTime: rl.reset_time,
+      available: true,
+    };
+  } else {
+    limitsInfo = {
+      available: false,
+    };
   }
 
   const hudData: HudData = {
@@ -96,6 +197,11 @@ async function collectData(): Promise<HudData> {
     planProgress: rolloutData?.planProgress ?? undefined,
     tokenUsage: rolloutData?.tokenUsage ?? undefined,
     contextUsage,
+    accountInfo,
+    limitsInfo,
+    // Runtime overrides from rollout turn_context events
+    runtimeApprovalPolicy: rolloutData?.approvalPolicy ?? undefined,
+    runtimeSandboxMode: rolloutData?.sandboxMode ?? undefined,
   };
 
   cachedHudData = hudData;
@@ -104,8 +210,11 @@ async function collectData(): Promise<HudData> {
 
 /**
  * Main render loop
+ * Uses setInterval for more reliable timing and error recovery
  */
-async function mainLoop(): Promise<void> {
+let renderIntervalId: NodeJS.Timeout | null = null;
+
+async function renderOnce(): Promise<void> {
   if (!isRunning) {
     return;
   }
@@ -114,18 +223,42 @@ async function mainLoop(): Promise<void> {
     const data = await collectData();
     renderToStdout(data);
   } catch (error) {
-    console.error('Render error:', error);
+    // Log error but don't stop the loop
+    // Use stderr to avoid corrupting HUD display
+    process.stderr.write(`[HUD Error] ${error}\n`);
   }
+}
 
-  // Schedule next render
-  setTimeout(mainLoop, REFRESH_INTERVAL);
+function startRenderLoop(): void {
+  // Initial render
+  renderOnce();
+
+  // Use setInterval for more reliable timing
+  // This ensures the loop continues even if renderOnce throws
+  renderIntervalId = setInterval(() => {
+    renderOnce();
+  }, REFRESH_INTERVAL);
+}
+
+function stopRenderLoop(): void {
+  if (renderIntervalId) {
+    clearInterval(renderIntervalId);
+    renderIntervalId = null;
+  }
 }
 
 /**
  * Handle graceful shutdown
  */
 function shutdown(): void {
+  if (!isRunning) {
+    return; // Prevent multiple shutdown calls
+  }
+
   isRunning = false;
+
+  // Stop render loop
+  stopRenderLoop();
 
   // Clean up watchers
   sessionFinder.stop();
@@ -164,10 +297,11 @@ async function main(): Promise<void> {
   sessionFinder.start(5000); // Check for session changes every 5 seconds
 
   // Start the render loop
-  console.log('Codex HUD starting...');
+  // Use stderr for startup message to avoid corrupting HUD display
+  process.stderr.write('Codex HUD starting...\n');
 
-  // Initial render
-  await mainLoop();
+  // Start the render loop
+  startRenderLoop();
 }
 
 // Run main

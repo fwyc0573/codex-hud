@@ -10,11 +10,13 @@ import type {
   ResponseItemPayload,
   EventMsgPayload,
   SessionMetaPayload,
+  TurnContextPayload,
   ToolCall,
   ToolActivity,
   PlanProgress,
   SessionInfo,
   TokenUsageInfo,
+  RateLimitSnapshot,
 } from '../types.js';
 
 /**
@@ -25,6 +27,10 @@ export interface RolloutParseResult {
   toolActivity: ToolActivity;
   planProgress: PlanProgress | null;
   tokenUsage: TokenUsageInfo | null;
+  rateLimits: RateLimitSnapshot | null;
+  // Session context from turn_context events
+  approvalPolicy: string | null;
+  sandboxMode: string | null;
 }
 
 /**
@@ -79,13 +85,16 @@ export async function parseRolloutFile(
   let session: SessionInfo | null = null;
   let planProgress: PlanProgress | null = null;
   let tokenUsage: TokenUsageInfo | null = null;
+  let rateLimits: RateLimitSnapshot | null = null;
+  let approvalPolicy: string | null = null;
+  let sandboxMode: string | null = null;
 
   // Track running tool calls by ID for duration calculation
   const runningCalls = new Map<string, ToolCall>();
 
   if (!fs.existsSync(rolloutPath)) {
     return {
-      result: { session, toolActivity, planProgress, tokenUsage },
+      result: { session, toolActivity, planProgress, tokenUsage, rateLimits, approvalPolicy, sandboxMode },
       newOffset: 0,
     };
   }
@@ -130,9 +139,9 @@ export async function parseRolloutFile(
             modelProvider: meta.model_provider,
             git: meta.git
               ? {
-                  branch: meta.git.branch,
-                  commitHash: meta.git.commit_hash,
-                }
+                branch: meta.git.branch,
+                commitHash: meta.git.commit_hash,
+              }
               : undefined,
           };
         } else if (entry.type === 'response_item') {
@@ -192,6 +201,17 @@ export async function parseRolloutFile(
             };
           } else if (payload.type === 'token_count' && payload.info) {
             tokenUsage = payload.info;
+          } else if (payload.type === 'rate_limit' && payload.rate_limits) {
+            rateLimits = payload.rate_limits;
+          }
+        } else if (entry.type === 'turn_context') {
+          // Parse turn_context for approval_policy and sandbox_mode
+          const payload = entry.payload as TurnContextPayload;
+          if (payload.approval_policy) {
+            approvalPolicy = payload.approval_policy;
+          }
+          if (payload.sandbox_policy?.type) {
+            sandboxMode = payload.sandbox_policy.type;
           }
         }
 
@@ -203,14 +223,14 @@ export async function parseRolloutFile(
 
     rl.on('close', () => {
       resolve({
-        result: { session, toolActivity, planProgress, tokenUsage },
+        result: { session, toolActivity, planProgress, tokenUsage, rateLimits, approvalPolicy, sandboxMode },
         newOffset: bytesRead,
       });
     });
 
     rl.on('error', () => {
       resolve({
-        result: { session, toolActivity, planProgress, tokenUsage },
+        result: { session, toolActivity, planProgress, tokenUsage, rateLimits, approvalPolicy, sandboxMode },
         newOffset: startOffset,
       });
     });
@@ -225,7 +245,7 @@ export class RolloutParser {
   private lastOffset: number = 0;
   private cachedResult: RolloutParseResult | null = null;
 
-  constructor(private maxRecentCalls: number = 10) {}
+  constructor(private maxRecentCalls: number = 10) { }
 
   /**
    * Set the rollout file to parse
@@ -259,7 +279,7 @@ export class RolloutParser {
       // Keep session from first parse
       result.session = this.cachedResult.session ?? result.session;
 
-      // Merge tool activity
+      // Merge tool activity - accumulate counts
       result.toolActivity.totalCalls += this.cachedResult.toolActivity.totalCalls;
       for (const [type, count] of Object.entries(
         this.cachedResult.toolActivity.callsByType
@@ -274,6 +294,29 @@ export class RolloutParser {
         ...result.toolActivity.recentCalls,
       ];
       result.toolActivity.recentCalls = allCalls.slice(-this.maxRecentCalls);
+
+      // For tokenUsage and planProgress, use the LATEST value (not merge)
+      // These represent current state, not accumulated history
+      // Only fall back to cached if new parse didn't find any
+      if (!result.tokenUsage && this.cachedResult.tokenUsage) {
+        result.tokenUsage = this.cachedResult.tokenUsage;
+      }
+      if (!result.planProgress && this.cachedResult.planProgress) {
+        result.planProgress = this.cachedResult.planProgress;
+      }
+      // Same for rateLimits - use latest or fall back to cached
+      if (!result.rateLimits && this.cachedResult.rateLimits) {
+        result.rateLimits = this.cachedResult.rateLimits;
+      }
+
+      // Same for approvalPolicy and sandboxMode - use latest or fall back to cached
+      // This prevents flickering when incremental parse doesn't encounter new turn_context events
+      if (!result.approvalPolicy && this.cachedResult.approvalPolicy) {
+        result.approvalPolicy = this.cachedResult.approvalPolicy;
+      }
+      if (!result.sandboxMode && this.cachedResult.sandboxMode) {
+        result.sandboxMode = this.cachedResult.sandboxMode;
+      }
     }
 
     this.cachedResult = result;

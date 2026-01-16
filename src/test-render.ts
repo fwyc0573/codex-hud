@@ -5,7 +5,7 @@
 
 import { renderHud } from './render/header.js';
 import type { HudData, RenderOptions, ContextUsage, ToolActivity, ToolCall } from './types.js';
-import { DEFAULT_LAYOUT } from './types.js';
+import { DEFAULT_LAYOUT, BASELINE_TOKENS } from './types.js';
 
 // ANSI color codes for visual verification output
 const RESET = '\x1b[0m';
@@ -37,17 +37,24 @@ function createMockData(options: {
 }): HudData {
   const { tokenPercent = 0, hasGit = false, isDirty = false, hasToolActivity = false, toolCount = 0 } = options;
 
-  // Calculate token values based on percentage
+  // Calculate token values based on percentage (using official Codex CLI formula)
   const contextWindow = 200000;  // 200K context window
-  const used = Math.floor(contextWindow * (tokenPercent / 100));
-  
+  // For testing: tokenPercent represents USAGE percentage
+  // Official formula uses BASELINE_TOKENS (12000) to calculate effective window
+  const effectiveWindow = contextWindow - BASELINE_TOKENS;
+  const contextLeftPercent = 100 - tokenPercent;  // Convert usage to "left"
+  const used = Math.floor(effectiveWindow * (tokenPercent / 100));
+  const totalTokens = used + BASELINE_TOKENS;
+
   const contextUsage: ContextUsage | undefined = tokenPercent > 0 ? {
-    used,
+    used: totalTokens,
     total: contextWindow,
-    percent: tokenPercent,
-    inputTokens: Math.floor(used * 0.7),
-    outputTokens: Math.floor(used * 0.3),
-    cachedTokens: Math.floor(used * 0.2),
+    percent: tokenPercent,  // Usage percentage (for progress bar)
+    contextLeftPercent,     // Context left percentage (official)
+    inputTokens: Math.floor(totalTokens * 0.7),
+    outputTokens: Math.floor(totalTokens * 0.3),
+    cachedTokens: Math.floor(totalTokens * 0.2),
+    lastTotalTokens: totalTokens,
   } : undefined;
 
   // Create tool activity if requested
@@ -56,7 +63,7 @@ function createMockData(options: {
     const toolTypes = ['Read', 'Bash', 'Edit', 'Write', 'Grep'];
     const recentCalls: ToolCall[] = [];
     const callsByType: Record<string, number> = {};
-    
+
     for (let i = 0; i < Math.min(toolCount, 5); i++) {
       const toolName = toolTypes[i % toolTypes.length];
       callsByType[toolName] = (callsByType[toolName] || 0) + 1;
@@ -69,7 +76,7 @@ function createMockData(options: {
         target: `/path/to/file-${i}.ts`,
       });
     }
-    
+
     toolActivity = {
       recentCalls,
       totalCalls: toolCount,
@@ -123,7 +130,7 @@ function createMockData(options: {
  */
 function runTestCase(name: string, data: HudData): void {
   divider(name);
-  
+
   const options: RenderOptions = {
     width: 120,
     showDetails: true,
@@ -134,16 +141,16 @@ function runTestCase(name: string, data: HudData): void {
       barWidth: 12,
     },
   };
-  
+
   const lines = renderHud(data, options);
-  
+
   console.log('Rendered output:');
   console.log('');
   for (const line of lines) {
     console.log(line);
   }
   console.log('');
-  
+
   log('Lines rendered', lines.length.toString());
 }
 
@@ -169,20 +176,20 @@ runTestCase('TEST 7: Git Branch (clean)', createMockData({ tokenPercent: 45, has
 runTestCase('TEST 8: Git Branch (dirty)', createMockData({ tokenPercent: 45, hasGit: true, isDirty: true }));
 
 // Test 9: Tool activity
-runTestCase('TEST 9: Tool Activity (5 calls)', createMockData({ 
-  tokenPercent: 60, 
-  hasGit: true, 
-  isDirty: true, 
-  hasToolActivity: true, 
-  toolCount: 5 
+runTestCase('TEST 9: Tool Activity (5 calls)', createMockData({
+  tokenPercent: 60,
+  hasGit: true,
+  isDirty: true,
+  hasToolActivity: true,
+  toolCount: 5
 }));
 
-runTestCase('TEST 10: Full Display (all features)', createMockData({ 
-  tokenPercent: 78, 
-  hasGit: true, 
-  isDirty: true, 
-  hasToolActivity: true, 
-  toolCount: 25 
+runTestCase('TEST 10: Full Display (all features)', createMockData({
+  tokenPercent: 78,
+  hasGit: true,
+  isDirty: true,
+  hasToolActivity: true,
+  toolCount: 25
 }));
 
 console.log(`\n${GREEN}All tests completed!${RESET}\n`);

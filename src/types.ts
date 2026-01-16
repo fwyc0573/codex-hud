@@ -4,15 +4,49 @@
  */
 
 // ============================================================================
+// Constants (matching Codex CLI official implementation)
+// ============================================================================
+
+/**
+ * Baseline tokens for system prompt, tools, and compact space.
+ * This value is subtracted from both the context window and usage
+ * to calculate the "effective" user-controllable portion.
+ * Matches the official Codex CLI implementation.
+ */
+export const BASELINE_TOKENS = 12000;
+
+// ============================================================================
 // Configuration Types
 // ============================================================================
 
 export interface CodexConfig {
   model?: string;
   model_provider?: string;
+  model_provider_url?: string;  // Full provider URL (e.g., https://www.packyapi.com/v1)
   approval_policy?: string;
   sandbox_mode?: string;
+  reasoning?: string;           // Reasoning level (e.g., xhigh, high, medium, low)
+  model_reasoning_effort?: string;  // Alternative field name for reasoning effort
+  summaries?: string;           // Summaries mode (e.g., auto, always, never)
   mcp_servers?: Record<string, McpServerConfig>;
+}
+
+// MCP server runtime status
+export type McpServerRunStatus = 'running' | 'stopped' | 'error' | 'unknown';
+
+export interface McpServerStatus {
+  name: string;
+  config: McpServerConfig;
+  status: McpServerRunStatus;
+  pid?: number;
+  error?: string;
+}
+
+export interface McpStatusSummary {
+  total: number;
+  running: number;
+  stopped: number;
+  error: number;
 }
 
 export interface McpServerConfig {
@@ -63,12 +97,18 @@ export interface ProjectInfo {
 // ============================================================================
 
 export interface ContextUsage {
-  used: number;
-  total: number;
-  percent: number;
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens: number;
+  used: number;           // Current context window usage (from last request total_tokens)
+  total: number;          // Total context window size
+  percent: number;        // Usage percentage (for backward compat, capped at 100%)
+  contextLeftPercent: number;  // Context LEFT percentage (official Codex CLI calculation)
+  inputTokens: number;    // Cumulative input tokens
+  outputTokens: number;   // Cumulative output tokens
+  cachedTokens: number;   // Cumulative cached tokens (subset of input)
+  // Last request values for accurate context display
+  lastInputTokens?: number;
+  lastOutputTokens?: number;
+  lastCachedTokens?: number;
+  lastTotalTokens?: number;  // last_token_usage.total_tokens (used for context calculation)
 }
 
 // ============================================================================
@@ -97,11 +137,23 @@ export interface LayoutConfig {
 
 export interface RolloutLine {
   timestamp: string;
-  type: 'session_meta' | 'response_item' | 'event_msg';
+  type: 'session_meta' | 'response_item' | 'event_msg' | 'turn_context';
   payload: RolloutPayload;
 }
 
-export type RolloutPayload = SessionMetaPayload | ResponseItemPayload | EventMsgPayload;
+export type RolloutPayload = SessionMetaPayload | ResponseItemPayload | EventMsgPayload | TurnContextPayload;
+
+export interface TurnContextPayload {
+  cwd: string;
+  approval_policy?: string;
+  sandbox_policy?: {
+    type?: string;
+    network_access?: boolean;
+  };
+  model?: string;
+  effort?: string;
+  summary?: string;
+}
 
 export interface SessionMetaPayload {
   id: string;
@@ -260,6 +312,27 @@ export interface SessionInfo {
 }
 
 // ============================================================================
+// Account Information
+// ============================================================================
+
+export interface AccountInfo {
+  type: 'api_key' | 'chatgpt' | 'unknown';
+  status: 'configured' | 'not_configured' | 'error';
+  message?: string;
+}
+
+// ============================================================================
+// Rate Limits Information
+// ============================================================================
+
+export interface LimitsInfo {
+  requestsRemaining?: number;
+  tokensRemaining?: number;
+  resetTime?: string;
+  available: boolean;
+}
+
+// ============================================================================
 // Complete HUD Data
 // ============================================================================
 
@@ -269,18 +342,27 @@ export interface HudData {
   git: GitStatus;
   project: ProjectInfo;
   sessionStart: Date;
-  
+
   // Session and rollout data
   session?: SessionInfo;
-  
+
   // Context/token usage
   contextUsage?: ContextUsage;
   tokenUsage?: TokenUsageInfo;
-  
+
   // Activity tracking
   toolActivity?: ToolActivity;
   agentActivity?: AgentActivity;
   planProgress?: PlanProgress;
+
+  // Additional status info (matching codex /status output)
+  accountInfo?: AccountInfo;
+  limitsInfo?: LimitsInfo;
+
+  // Runtime overrides from rollout turn_context events
+  // These take precedence over config.toml values
+  runtimeApprovalPolicy?: string;
+  runtimeSandboxMode?: string;
 }
 
 // ============================================================================

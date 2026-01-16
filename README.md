@@ -47,7 +47,7 @@ That's it! After installation, typing `codex` will automatically launch with the
 ### Phase 3 (Seamless Integration) ✨ NEW
 - **Automatic tmux Installation**: Installs tmux if not present
 - **Shell Alias Integration**: `codex` command automatically launches with HUD
-- **Session Reuse**: Same directory reuses existing tmux session
+- **Unique Sessions by Default**: Each terminal run creates a new tmux session
 - **Configurable HUD Position**: Top or bottom (environment variable)
 - **One-Command Install/Uninstall**: Simple setup and removal
 
@@ -142,6 +142,8 @@ codex-hud --help
 | `CODEX_HUD_POSITION` | HUD pane position: `bottom`, `top` | `bottom` |
 | `CODEX_HUD_HEIGHT` | HUD pane height in lines | `3` |
 | `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
+| `CODEX_HUD_SESSION_MODE` | Session mode: `unique`, `shared` | `unique` |
+| `CODEX_HUD_BYPASS` | If set, run original Codex without HUD | (unset) |
 
 Example:
 ```bash
@@ -150,9 +152,14 @@ CODEX_HUD_POSITION=top codex
 
 # Taller HUD
 CODEX_HUD_HEIGHT=5 codex
+
+# Bypass HUD and run original Codex
+CODEX_HUD_BYPASS=1 codex
 ```
 
 ## Display Format
+
+The wrapper uses tmux by default and creates a fresh session for each `codex` launch (unless you set `CODEX_HUD_SESSION_MODE=shared`).
 
 The wrapper creates a tmux session with:
 - **Main pane** (90%): Codex CLI

@@ -35,3 +35,8 @@ coverage/
 .env
 .env.local
 .env.*.local
+
+.kiro/
+doc/
+tests/
+CLAUDE.md

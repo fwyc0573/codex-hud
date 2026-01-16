@@ -5,7 +5,7 @@
 
 import { watch, type FSWatcher } from 'chokidar';
 import * as path from 'path';
-import { getCodexHome, getSessionsDir } from './session-finder.js';
+import { getCodexHome, getSessionsDir, isHudSessionScoped } from './session-finder.js';
 
 export type FileChangeCallback = (path: string, event: 'add' | 'change' | 'unlink') => void;
 
@@ -135,7 +135,9 @@ export class HudFileWatcher {
    */
   start(): void {
     this.configWatcher.start();
-    this.startSessionWatcher();
+    if (!isHudSessionScoped()) {
+      this.startSessionWatcher();
+    }
   }
 
   /**

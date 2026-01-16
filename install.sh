@@ -309,6 +309,7 @@ main() {
     echo "Configuration options:"
     echo "  ${CYAN}CODEX_HUD_POSITION=top${NC}    - Put HUD on top"
     echo "  ${CYAN}CODEX_HUD_HEIGHT=5${NC}       - Taller HUD pane"
+    echo "  ${CYAN}CODEX_HUD_BYPASS=1 codex${NC} - Run original codex without HUD"
     echo ""
     echo "To uninstall: ${YELLOW}./uninstall.sh${NC}"
 }

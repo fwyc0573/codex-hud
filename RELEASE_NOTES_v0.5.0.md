@@ -66,9 +66,11 @@ cd codex-hud
 ## Display Format
 
 ```
-[gpt-5.2-codex] │ my-project git:(main) ● │ ⏱️ 12m │ 🎫 ████░░░░ 50.2K/12.5K
-MCP: 3 │ Approval: on-req │ AGENTS.md: 2
-Tools: ✓ 15 (234 total)
+[gpt-5.2:medium] ░░░░░░░░░░░░ 100% left ⏱️  28m @openai
+codex-hud git:(v0.5 *) !1 ?1 | 3 cfg | Appr:on-req
+Tokens: 39.1K (38.6K in, 29.7K cache, 556 out) | Ctx: 100% left (8.4K/258.4K)
+Dir: ...ethanfeng/Documents/GitHub/codex-hud | Session: 019bc7f3...
+◑ exec_command | ✓ exec_command ×9 | (11 total)
 ```
 
 ---

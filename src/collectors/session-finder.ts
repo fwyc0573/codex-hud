@@ -170,6 +170,23 @@ export function findActiveRollouts(withinSeconds: number = 60): SessionFile[] {
 /**
  * Find a rollout file by session ID
  */
+/**
+ * Find an active session (convenience wrapper)
+ * Returns the path to the most recently modified rollout file
+ */
+export async function findActiveSession(): Promise<string | null> {
+  const active = findActiveRollouts(60);
+  if (active.length > 0) {
+    return active[0].path;
+  }
+  
+  const recent = findMostRecentRollout(1);
+  return recent?.path ?? null;
+}
+
+/**
+ * Find a rollout file by session ID
+ */
 export function findRolloutBySessionId(
   sessionId: string,
   maxDaysBack: number = 7

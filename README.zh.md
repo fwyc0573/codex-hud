@@ -82,6 +82,18 @@ OpenAI Codex CLI 的实时状态栏 HUD。
 3. 在 `~/.bashrc` 和 `~/.zshrc` 添加别名（`codex`、`codex-resume`，并备份旧别名）
 4. 如果未安装 tmux 则提示安装
 
+安装完成后，请刷新 shell 环境使别名生效：
+
+```bash
+# Bash
+source ~/.bashrc
+
+# Zsh
+source ~/.zshrc
+```
+
+或者关闭并重新打开终端。
+
 ### 手动安装
 
 ```bash
@@ -113,6 +125,18 @@ source ~/.bashrc
 - 从常见 shell rc 文件中移除 codex-hud 别名
 - 终止所有正在运行的 codex-hud session 与 HUD pane
 - 如果存在备份则恢复原有别名
+
+卸载完成后，请刷新 shell 环境使更改生效：
+
+```bash
+# Bash
+source ~/.bashrc
+
+# Zsh
+source ~/.zshrc
+```
+
+或者关闭并重新打开终端。
 
 ## 使用方法
 

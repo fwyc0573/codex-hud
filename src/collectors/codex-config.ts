@@ -5,17 +5,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as TOML from '@iarna/toml';
 import type { CodexConfig, McpServerConfig } from '../types.js';
-
-/**
- * Get the Codex home directory
- * Priority: CODEX_HOME env var > ~/.codex
- */
-export function getCodexHome(): string {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-}
+import { getCodexHome } from '../utils/codex-path.js';
 
 /**
  * Get the path to config.toml

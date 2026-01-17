@@ -10,7 +10,8 @@ import { SessionFinder } from './collectors/session-finder.js';
 import { RolloutParser } from './collectors/rollout.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
-import type { HudData } from './types.js';
+import { BASELINE_TOKENS } from './types.js';
+import type { HudData, TokenUsage } from './types.js';
 
 // Session start time
 const SESSION_START = new Date();
@@ -18,11 +19,36 @@ const SESSION_START = new Date();
 // Refresh interval in milliseconds
 const REFRESH_INTERVAL = 1000;
 
+// Current working directory for the HUD
+const HUD_CWD = process.env.CODEX_HUD_CWD || process.cwd();
+
 // Track if we're running
 let isRunning = true;
 
+function getNonCachedInputTokens(usage: TokenUsage | undefined): number {
+  if (!usage) {
+    return 0;
+  }
+
+  const input = usage.input_tokens ?? 0;
+  const cached = usage.cached_input_tokens ?? 0;
+  return Math.max(0, input - cached);
+}
+
+function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
+  if (contextWindow <= BASELINE_TOKENS) {
+    return 0;
+  }
+
+  const effectiveWindow = contextWindow - BASELINE_TOKENS;
+  const used = Math.max(0, tokensInContext - BASELINE_TOKENS);
+  const remaining = Math.max(0, effectiveWindow - used);
+  const percent = (remaining / effectiveWindow) * 100;
+  return Math.round(Math.max(0, Math.min(100, percent)));
+}
+
 // Phase 2: Session and rollout tracking
-const sessionFinder = new SessionFinder((session) => {
+const sessionFinder = new SessionFinder(HUD_CWD, (session) => {
   // When session changes, update rollout path
   if (session) {
     rolloutParser.setRolloutPath(session.path);
@@ -37,13 +63,11 @@ const hudFileWatcher = new HudFileWatcher();
 let cachedHudData: HudData | null = null;
 let configNeedsRefresh = false;
 
-
-
 /**
  * Collect all HUD data (synchronous parts)
  */
 function collectSyncData(): Omit<HudData, 'toolActivity' | 'planProgress' | 'tokenUsage' | 'session' | 'contextUsage'> {
-  const cwd = process.env.CODEX_HUD_CWD || process.cwd();
+  const cwd = HUD_CWD;
   const config = readCodexConfig();
 
   return {
@@ -71,20 +95,27 @@ async function collectData(): Promise<HudData> {
   }
 
   // Build context usage from token usage if available
+  // Matches codex "context window left" calculation based on last_token_usage.
   let contextUsage = undefined;
-  if (rolloutData?.tokenUsage?.total_token_usage) {
-    const tu = rolloutData.tokenUsage.total_token_usage;
-    const total = tu.total_tokens ?? 0;
-    const contextWindow = rolloutData.tokenUsage.model_context_window ?? 0;
-    
-    if (contextWindow > 0) {
+  if (rolloutData?.tokenUsage) {
+    const tokenInfo = rolloutData.tokenUsage;
+    const contextWindow = tokenInfo.model_context_window ?? 0;
+    const lastUsage = tokenInfo.last_token_usage;
+
+    if (contextWindow > 0 && lastUsage) {
+      const tokensInContext = lastUsage.total_tokens ?? 0;
+      const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
+      const percentUsed = 100 - percentRemaining;
+
       contextUsage = {
-        used: total,
+        used: tokensInContext,
         total: contextWindow,
-        percent: Math.round((total / contextWindow) * 100),
-        inputTokens: tu.input_tokens ?? 0,
-        outputTokens: tu.output_tokens ?? 0,
-        cachedTokens: tu.cached_input_tokens ?? 0,
+        percent: percentUsed,
+        inputTokens: getNonCachedInputTokens(lastUsage),
+        outputTokens: lastUsage.output_tokens ?? 0,
+        cachedTokens: lastUsage.cached_input_tokens ?? 0,
+        compactCount: rolloutData.compactCount ?? 0,
+        lastCompactTime: rolloutData.lastCompactTime ?? undefined,
       };
     }
   }

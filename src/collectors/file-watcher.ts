@@ -5,7 +5,7 @@
 
 import { watch, type FSWatcher } from 'chokidar';
 import * as path from 'path';
-import { getCodexHome, getSessionsDir } from './session-finder.js';
+import { getCodexHome, getSessionsDir } from '../utils/codex-path.js';
 
 export type FileChangeCallback = (path: string, event: 'add' | 'change' | 'unlink') => void;
 

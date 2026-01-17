@@ -5,7 +5,7 @@
 #
 # Environment variables:
 #   CODEX_HUD_POSITION - HUD pane position: bottom (default), top
-#   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 3)
+#   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 25% of terminal height, min 3)
 #   CODEX_HUD_NO_ATTACH - If set, don't attach to existing session
 #
 
@@ -14,11 +14,14 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HUD_DIR="$(dirname "$SCRIPT_DIR")"
-HUD_HEIGHT="${CODEX_HUD_HEIGHT:-3}"
+HUD_HEIGHT="${CODEX_HUD_HEIGHT:-}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
+ALIAS_MARKER="# codex-hud alias"
+CODEX_CLI_PATH=""
 
-# Generate session name based on PWD hash (allows session reuse per directory)
-SESSION_NAME="codex-hud-$(echo "$PWD" | md5sum 2>/dev/null | cut -c1-8 || echo "$$")"
+# Generate session name based on PWD hash (unique per invocation)
+SESSION_PREFIX="codex-hud-$(echo "$PWD" | md5sum 2>/dev/null | cut -c1-8 || echo "$$")"
+SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
 
 # Colors for output
 RED='\033[0;31m'
@@ -51,6 +54,55 @@ step() {
 # Check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+resolve_codex_cli() {
+    local path
+    path=$(command -v codex 2>/dev/null || true)
+    if [[ -z "$path" ]]; then
+        error "codex CLI is not found in PATH.
+
+Install Codex CLI from: https://github.com/openai/codex"
+    fi
+    if [[ "$path" == "$SCRIPT_DIR/codex-hud" ]]; then
+        error "codex resolves to codex-hud wrapper. Fix your alias to point to the real codex CLI."
+    fi
+    CODEX_CLI_PATH="$path"
+}
+
+# Get zsh rc file location (respects ZDOTDIR when set)
+get_zsh_rc_file() {
+    if [[ -n "${ZDOTDIR:-}" ]]; then
+        echo "$ZDOTDIR/.zshrc"
+        return 0
+    fi
+    echo "$HOME/.zshrc"
+}
+
+# Get the RC file for the current shell
+get_shell_rc_file() {
+    local shell_name
+    shell_name=$(basename "$SHELL")
+    case "$shell_name" in
+        bash)
+            if [[ -f "$HOME/.bashrc" ]]; then
+                echo "$HOME/.bashrc"
+            elif [[ -f "$HOME/.bash_profile" ]]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        zsh)
+            get_zsh_rc_file
+            ;;
+        fish)
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
 }
 
 # Detect OS and package manager
@@ -147,11 +199,7 @@ check_dependencies() {
         fi
     fi
     
-    if ! command_exists codex; then
-        error "codex CLI is not found in PATH.
-
-Install Codex CLI from: https://github.com/openai/codex"
-    fi
+    resolve_codex_cli
     
     if ! command_exists node; then
         error "Node.js is required but not installed.
@@ -183,6 +231,11 @@ get_cwd() {
     pwd
 }
 
+# Get the first pane ID in the session
+get_primary_pane_id() {
+    tmux list-panes -t "$SESSION_NAME" -F "#{pane_id}" 2>/dev/null | head -n1
+}
+
 # Check if session already exists and is usable
 check_existing_session() {
     if [[ -n "${CODEX_HUD_NO_ATTACH:-}" ]]; then
@@ -205,6 +258,45 @@ cleanup() {
     fi
 }
 
+# Resolve HUD height based on terminal size
+resolve_hud_height() {
+    local term_height="$1"
+    local requested="$HUD_HEIGHT"
+    local min_height=3
+    local max_height=$((term_height - 1))
+    if [[ "$max_height" -lt 1 ]]; then
+        max_height=1
+    fi
+    
+    if [[ -n "$requested" ]]; then
+        if ! [[ "$requested" =~ ^[0-9]+$ ]]; then
+            error "CODEX_HUD_HEIGHT must be a positive integer (got: $requested)"
+        fi
+        if [[ "$requested" -gt "$max_height" ]]; then
+            HUD_HEIGHT="$max_height"
+            return 0
+        fi
+        if [[ "$requested" -lt 1 ]]; then
+            HUD_HEIGHT="1"
+            return 0
+        fi
+        HUD_HEIGHT="$requested"
+        return 0
+    fi
+    
+    local desired=$((term_height / 4))
+    if [[ "$desired" -lt "$min_height" ]]; then
+        desired="$min_height"
+    fi
+    if [[ "$desired" -gt "$max_height" ]]; then
+        desired="$max_height"
+    fi
+    if [[ "$desired" -lt 1 ]]; then
+        desired="1"
+    fi
+    HUD_HEIGHT="$desired"
+}
+
 # Create new tmux session with HUD
 create_session() {
     local cwd="$1"
@@ -216,12 +308,13 @@ create_session() {
     local term_width
     term_height=$(tput lines 2>/dev/null || echo 24)
     term_width=$(tput cols 2>/dev/null || echo 80)
+    resolve_hud_height "$term_height"
     
     # Build the codex command string
-    local codex_cmd="codex"
+    local codex_cmd="$CODEX_CLI_PATH"
     if [[ ${#codex_args[@]} -gt 0 ]]; then
         # Properly quote arguments
-        codex_cmd="codex"
+        codex_cmd="$CODEX_CLI_PATH"
         for arg in "${codex_args[@]}"; do
             codex_cmd="$codex_cmd '$arg'"
         done
@@ -229,24 +322,29 @@ create_session() {
     
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    local main_pane_id
+    main_pane_id=$(get_primary_pane_id)
+    if [[ -z "$main_pane_id" ]]; then
+        error "Failed to detect tmux pane for session: $SESSION_NAME"
+    fi
     
-    # Send the codex command to the main pane
-    tmux send-keys -t "$SESSION_NAME" "cd '$cwd' && $codex_cmd" C-m
+    # Send the codex command to the main pane; auto-cleanup when it exits
+    tmux send-keys -t "$SESSION_NAME" "cd '$cwd' && $codex_cmd; tmux kill-session -t '$SESSION_NAME'" C-m
     
     # Wait a moment for the session to be ready
     sleep 0.2
     
     # Split the window based on HUD_POSITION
-    local hud_cmd="cd '$cwd' && CODEX_HUD_CWD='$cwd' node '$HUD_DIR/dist/index.js'"
+    local hud_cmd="cd '$cwd' && LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD='$cwd' node '$HUD_DIR/dist/index.js'"
     
     if [[ "$HUD_POSITION" == "top" ]]; then
         # Split at top, then swap panes
         tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b "$hud_cmd"
-        tmux select-pane -t "$SESSION_NAME:.2"
+        tmux select-pane -t "$main_pane_id"
     else
         # Default: bottom
         tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" "$hud_cmd"
-        tmux select-pane -t "$SESSION_NAME:.1"
+        tmux select-pane -t "$main_pane_id"
     fi
     
     SESSION_CREATED="true"
@@ -270,6 +368,11 @@ main() {
     # Check for existing session
     if check_existing_session; then
         info "Attaching to existing session: $SESSION_NAME"
+        local main_pane_id
+        main_pane_id=$(get_primary_pane_id)
+        if [[ -n "$main_pane_id" ]]; then
+            tmux select-pane -t "$main_pane_id" 2>/dev/null || true
+        fi
         tmux attach-session -t "$SESSION_NAME"
         return 0
     fi
@@ -282,6 +385,11 @@ main() {
     create_session "$cwd" "${codex_args[@]}"
     
     # Attach to the session
+    local main_pane_id
+    main_pane_id=$(get_primary_pane_id)
+    if [[ -n "$main_pane_id" ]]; then
+        tmux select-pane -t "$main_pane_id" 2>/dev/null || true
+    fi
     tmux attach-session -t "$SESSION_NAME"
 }
 
@@ -299,12 +407,13 @@ All arguments are passed through to the codex command.
 
 Options:
   -h, --help          Show this help message
+  --self-check        Run environment diagnostics
   --kill              Kill existing session for current directory
   --list              List all codex-hud sessions
 
 Environment Variables:
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
-  CODEX_HUD_HEIGHT    HUD pane height in lines (default: 3)
+  CODEX_HUD_HEIGHT    HUD pane height in lines (default: 25% of terminal height, min 3)
   CODEX_HUD_NO_ATTACH If set, always create new session
 
 Requirements:
@@ -323,14 +432,91 @@ For more information, see: https://github.com/openai/codex
 EOF
 }
 
+# Run environment diagnostics
+self_check() {
+    local failures=0
+    
+    echo "Codex HUD self-check"
+    echo ""
+    
+    if [[ -n "${ZDOTDIR:-}" ]] && [[ ! -d "$ZDOTDIR" ]]; then
+        warn "ZDOTDIR is set but does not exist: $ZDOTDIR"
+        failures=$((failures + 1))
+    fi
+    
+    local codex_path
+    codex_path=$(command -v codex 2>/dev/null || true)
+    if [[ -n "$codex_path" ]]; then
+        info "codex: $codex_path"
+        if [[ "$codex_path" == "$SCRIPT_DIR/codex-hud" ]]; then
+            warn "codex resolves to codex-hud wrapper; fix alias to the real codex CLI."
+            failures=$((failures + 1))
+        fi
+    else
+        warn "codex CLI not found in PATH"
+        failures=$((failures + 1))
+    fi
+    
+    if command_exists node; then
+        info "node $(node --version)"
+    else
+        warn "node not found in PATH"
+        failures=$((failures + 1))
+    fi
+    
+    if command_exists tmux; then
+        info "tmux $(tmux -V)"
+        local pane_index
+        pane_index=$(tmux show-options -gqv pane-base-index)
+        if [[ -n "$pane_index" && "$pane_index" != "0" ]]; then
+            info "tmux pane-base-index=$pane_index (supported)"
+        fi
+    else
+        warn "tmux not found in PATH"
+        failures=$((failures + 1))
+    fi
+    
+    local rc_file
+    rc_file=$(get_shell_rc_file)
+    if [[ -z "$rc_file" ]]; then
+        warn "Unable to determine shell rc file for: $SHELL"
+        failures=$((failures + 1))
+    elif [[ ! -f "$rc_file" ]]; then
+        warn "RC file not found: $rc_file"
+        failures=$((failures + 1))
+    elif grep -q "$ALIAS_MARKER" "$rc_file" 2>/dev/null; then
+        info "Alias marker found in $rc_file"
+    else
+        warn "Alias marker not found in $rc_file"
+        failures=$((failures + 1))
+    fi
+    
+    if [[ ! -f "$HUD_DIR/dist/index.js" ]]; then
+        warn "HUD build output not found: $HUD_DIR/dist/index.js"
+    fi
+    
+    if [[ "$failures" -gt 0 ]]; then
+        warn "Self-check found $failures issue(s)."
+        exit 1
+    fi
+    
+    info "Self-check passed."
+}
+
 # Kill existing session
 kill_session() {
-    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-        tmux kill-session -t "$SESSION_NAME"
-        info "Session '$SESSION_NAME' killed."
-    else
-        warn "No session found: $SESSION_NAME"
+    local sessions
+    sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
+    if [[ -z "$sessions" ]]; then
+        warn "No session found: $SESSION_PREFIX"
+        return
     fi
+    while IFS= read -r session_name; do
+        if [[ -n "$session_name" ]]; then
+            tmux kill-session -t "$session_name"
+        fi
+    done <<< "$sessions"
+    info "Session(s) '$SESSION_PREFIX' killed."
 }
 
 # List all codex-hud sessions
@@ -343,6 +529,10 @@ list_sessions() {
 case "${1:-}" in
     -h|--help)
         show_help
+        exit 0
+        ;;
+    --self-check)
+        self_check
         exit 0
         ;;
     --kill)

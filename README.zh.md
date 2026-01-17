@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes                          |
+|------------|---------------------------------------------|
+| 2026-01-18 | Sync README with current HUD behavior and paths |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -12,12 +18,10 @@ OpenAI Codex CLI 的实时状态栏 HUD。
 ## 快速开始（一键安装）
 
 ```bash
-# 克隆并安装
-git clone https://github.com/your-repo/codex-hud.git
-cd codex-hud
+# From the repository root
 ./install.sh
 
-# 现在只需输入 'codex' - HUD 会自动显示！
+# Now just type 'codex' - HUD appears automatically!
 ```
 
 就是这么简单！安装完成后，输入 `codex` 将自动启动并显示 HUD。
@@ -25,19 +29,19 @@ cd codex-hud
 ## 功能特性
 
 ### 第一阶段（基础功能）
-- **模型显示**: 显示来自 `~/.codex/config.toml` 的当前模型
-- **Git 状态**: 分支名称和脏状态指示器
-- **项目信息**: 当前目录和项目名称
+- **模型显示**: 显示来自 `config.toml` 的当前模型
+- **Git 状态**: branch、dirty 指示、ahead/behind 以及变更统计
+- **项目信息**: 项目名称和工作目录
 - **会话计时器**: 会话开始后的时间
-- **MCP 服务器**: 已配置的 MCP 服务器数量
-- **审批策略**: 当前审批策略设置
-- **AGENTS.md 检测**: 项目中 AGENTS.md 文件的数量
+- **配置/模式信号**: `.codex` config 数量、work mode、extensions（MCP servers）
+- **指令信号**: AGENTS.md、INSTRUCTIONS.md 和 `.codex/rules` 计数
+- **审批策略 + Sandbox**: 显示 approval policy 和 sandbox mode（如果配置）
 
 ### 第二阶段（高级功能）✨ 新增
-- **Token 使用量**: 带进度条的实时 Token 消耗显示
-  - 从会话回放文件读取 (`~/.codex/sessions/`)
-  - 显示输入/输出 Token 数量
-  - 带颜色编码的可视化进度条
+- **Token + Context Usage**: 实时 Token 与 context window 使用
+  - 从 rollout 的 `token_count`、`turn_started` 事件读取
+  - 使用 `last_token_usage` 和 baseline token 预留
+  - 显示 `/compact` 次数（`context_compacted`）
 - **工具活动追踪**: 监控工具调用
   - 显示最近的工具调用次数
   - 显示会话中的总工具调用次数
@@ -46,13 +50,13 @@ cd codex-hud
   - 监听 config.toml 的更改
   - 监听活动会话的回放文件
 - **会话自动检测**: 自动查找活动的 Codex 会话
-  - 搜索 `~/.codex/sessions/` 目录结构
+  - 按 session CWD 过滤，搜索近期会话（默认 30 天）
   - 优先选择最近修改的会话
 
 ### 第三阶段（无缝集成）✨ 新增
 - **自动安装 tmux**: 如果未安装则自动安装 tmux
-- **Shell 别名集成**: `codex` 命令自动启动带 HUD 的版本
-- **会话复用**: 相同目录复用现有的 tmux 会话
+- **Shell 别名集成**: `codex` 和 `codex-resume` 自动启动 HUD
+- **每次启动新 session**: 退出时自动清理 tmux session
 - **可配置 HUD 位置**: 顶部或底部（通过环境变量）
 - **一键安装/卸载**: 简单的设置和移除
 
@@ -61,16 +65,13 @@ cd codex-hud
 - **Node.js** 18+
 - **OpenAI Codex CLI** 已安装并在 PATH 中
 - **tmux**（如果缺失会自动安装）
+- **Codex home** 位于 `CODEX_HOME`、`~/.codex` 或 `~/.codex_home`（需存在 `sessions/` 目录或配置 `CODEX_SESSIONS_PATH`）
 
 ## 安装
 
 ### 推荐：自动安装
 
 ```bash
-# 克隆仓库
-git clone https://github.com/your-repo/codex-hud.git
-cd codex-hud
-
 # 运行安装程序
 ./install.sh
 ```
@@ -78,7 +79,7 @@ cd codex-hud
 安装程序将会：
 1. 安装 Node.js 依赖
 2. 构建 TypeScript 项目
-3. 添加 shell 别名使 `codex` → `codex-hud`
+3. 在 `~/.bashrc` 和 `~/.zshrc` 添加别名（`codex`、`codex-resume`，并备份旧别名）
 4. 如果未安装 tmux 则提示安装
 
 ### 手动安装
@@ -98,6 +99,7 @@ chmod +x bin/codex-hud
 
 # 将别名添加到 shell 配置文件 (~/.bashrc 或 ~/.zshrc)
 echo "alias codex='/path/to/codex-hud/bin/codex-hud'" >> ~/.bashrc
+echo "alias codex-resume='/path/to/codex-hud/bin/codex-hud resume'" >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -108,9 +110,9 @@ source ~/.bashrc
 ```
 
 这将会：
-- 移除 shell 别名
-- 终止所有正在运行的 codex-hud 会话
-- 显示备份的原始别名位置（如果有）
+- 从常见 shell rc 文件中移除 codex-hud 别名
+- 终止所有正在运行的 codex-hud session 与 HUD pane
+- 如果存在备份则恢复原有别名
 
 ## 使用方法
 
@@ -125,6 +127,9 @@ codex --model gpt-5
 
 # 带初始提示
 codex "help me debug this"
+
+# Resume (passes through to codex CLI)
+codex-resume
 ```
 
 ### 其他命令
@@ -138,6 +143,9 @@ codex-hud --list
 
 # 显示帮助
 codex-hud --help
+
+# Run environment diagnostics
+codex-hud --self-check
 ```
 
 ### 环境变量
@@ -145,8 +153,16 @@ codex-hud --help
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
 | `CODEX_HUD_POSITION` | HUD 面板位置：`bottom`、`top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | `3` |
+| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | 终端高度的 25%（最小 3） |
 | `CODEX_HUD_NO_ATTACH` | 如果设置，总是创建新会话 | （未设置） |
+| `CODEX_HUD_CWD` | 覆盖 HUD 使用的工作目录（用于上下文/会话匹配） | （未设置；由 wrapper 设置） |
+
+### 路径覆盖
+
+| 变量 | 描述 | 默认值 |
+|------|------|--------|
+| `CODEX_HOME` | Codex home 目录（config + sessions） | `~/.codex` 或 `~/.codex_home` |
+| `CODEX_SESSIONS_PATH` | 覆盖 sessions 目录 | （未设置） |
 
 示例：
 ```bash
@@ -157,39 +173,57 @@ CODEX_HUD_POSITION=top codex
 CODEX_HUD_HEIGHT=5 codex
 ```
 
+Note: HUD height is clamped to the available terminal size.
+
 ## 显示格式
 
 包装器创建一个 tmux 会话，包含：
-- **主面板**（90%）：Codex CLI
-- **HUD 面板**（10%）：状态栏
+- **主面板**：Codex CLI
+- **HUD 面板**：状态行（展开布局多行，紧凑布局单行）
 
 ```
-[gpt-5.2-codex] │ my-project git:(main) ● │ ⏱️ 12m │ 🎫 ████░░░░ 50.2K/12.5K
-MCP: 3 │ Approval: on-req │ AGENTS.md: 2
-Tools: ✓ 15 (234 total)
+[gpt-5.2-codex] █████░░░░ 45% │ my-project git:(main ●) │ ⏱️ 12m
+1 configs | mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
+🎫 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
+◐ Edit: file.ts | ✓ Read ×3
 ```
 
 ### 第一行：标题
 - `[model-name]` - 当前模型
+- `█████░░░░ 45%` - context 使用条（来自 session token 数据）
 - `project-name` - 当前目录名称
-- `git:(branch)` - Git 分支（如果在仓库中）
-- `●` - 脏状态指示器（有未提交的更改）
+- `git:(branch ●)` - Git 分支 + dirty 指示器（如果在仓库中）
 - `⏱️ duration` - 会话持续时间
-- `🎫 progress input/output` - 带进度条的 Token 使用量
 
-### 第二行：详细信息
-- `MCP: N` - 已启用的 MCP 服务器数量
+### 第二行：环境
+- `N configs` - `.codex` config 数量
+- `mode: dev/prod` - work mode
+- `N extensions` - 已启用的 MCP servers
+- `N AGENTS.md` / `N INSTRUCTIONS.md` / `N rules` - 指令信号
 - `Approval: policy` - 审批策略
-- `AGENTS.md: N` - AGENTS.md 文件数量
-- `Sandbox: mode` - 沙箱模式（如果已配置）
+- `Sandbox: mode` - Sandbox 模式（如果已配置）
 
-### 第三行：活动
-- `Tools: ✓ N` - 最近的工具调用（已完成）
-- `(N total)` - 会话中的总工具调用次数
+### 第三行：Tokens + Context
+- `Tokens: N` - 总 Token（可带输入/cache/输出拆分）
+- `Ctx: ███░░ 45% (used/total)` - Context 使用条与计数
+- `↻N` - `/compact` 次数
+
+### 第四行：Session 详情
+- `Dir: ~/path` - 工作目录（截断显示）
+- `Session: abc12345` - Session ID（短版）
+- `CLI: x.y.z` / `Provider: openai` - 可选 session 元数据
+
+### 第五行及以后：活动
+- `◐ Edit: file.ts` - 正在运行的 tool call
+- `✓ Read ×3` - 最近 tool call 分组与计数
+- 有 plan progress 时显示进度行
+
+当 HUD height 小于可用行数时，会以 `…N more lines hidden` 提示截断。
 
 ## 配置
 
-HUD 从 `~/.codex/config.toml` 读取配置。
+HUD 从 `CODEX_HOME/config.toml` 读取配置（默认 `~/.codex/config.toml`，并回退到 `~/.codex_home/config.toml`）。
 
 ### 支持的字段
 
@@ -215,9 +249,9 @@ enabled = true
 
 ### Token 使用量（第二阶段）
 Token 数据从 Codex 会话回放文件中提取：
-- 位置：`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
-- 格式：包含 `token_count` 事件的 `event_msg` 条目的 JSONL
-- 字段：`input_tokens`、`output_tokens`、`cached_input_tokens`
+- 位置：`CODEX_SESSIONS_PATH` 或 `${CODEX_HOME:-~/.codex}/sessions/YYYY/MM/DD/rollout-*.jsonl`
+- 格式：包含 `token_count`、`turn_started`、`context_compacted` 的 `event_msg`
+- 字段：`total_token_usage`、`last_token_usage`、`model_context_window`、`cached_input_tokens`
 
 ### 工具活动（第二阶段）
 从回放文件追踪工具调用：
@@ -233,18 +267,28 @@ codex-hud/
 │   └── codex-hud              # Bash 包装器（创建 tmux 会话）
 ├── src/
 │   ├── index.ts               # 主入口点
+│   ├── test-render.ts         # 渲染测试脚本
 │   ├── types.ts               # 类型定义
+│   ├── utils/
+│   │   └── codex-path.ts      # 解析 CODEX_HOME + sessions path
 │   ├── collectors/
-│   │   ├── codex-config.ts    # 解析 ~/.codex/config.toml
+│   │   ├── codex-config.ts    # 解析 config.toml
 │   │   ├── git.ts             # Git 状态收集
 │   │   ├── project.ts         # 项目信息收集
-│   │   ├── rollout.ts         # 解析会话回放文件（第二阶段）
-│   │   ├── session-finder.ts  # 查找活动会话（第二阶段）
-│   │   └── file-watcher.ts    # 基于 chokidar 的监听器（第二阶段）
+│   │   ├── rollout.ts         # 解析会话回放文件
+│   │   ├── session-finder.ts  # 查找活动会话
+│   │   └── file-watcher.ts    # 基于 chokidar 的监听器
 │   └── render/
 │       ├── colors.ts          # ANSI 颜色工具
 │       ├── header.ts          # 状态行渲染
-│       └── index.ts           # 主渲染器
+│       ├── index.ts           # 主渲染器
+│       └── lines/             # 行渲染器
+│           ├── activity-line.ts
+│           ├── environment-line.ts
+│           ├── identity-line.ts
+│           ├── project-line.ts
+│           ├── session-line.ts
+│           └── usage-line.ts
 ├── dist/                      # 编译后的 JavaScript
 ├── package.json
 └── tsconfig.json
@@ -270,7 +314,7 @@ node dist/index.js
 
 1. **Token 使用量准确性**: 取决于 Codex 会话回放格式
 2. **需要 tmux**: 分屏显示需要 tmux
-3. **需要包装器启动**: 必须使用 `codex-hud` 而不是直接使用 `codex`
+3. **需要包装器启动**: 使用 `codex-hud`（或 `codex`/`codex-resume` 别名）才能显示 HUD
 4. **会话检测延迟**: 检测新会话最多需要 5 秒
 
 ## 更新日志

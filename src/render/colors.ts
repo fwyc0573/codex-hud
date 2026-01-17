@@ -130,6 +130,7 @@ export const icons = {
   arrow: '→',
   bullet: '▸',
   multiply: '×',
+  refresh: '↻',  // For compact count indicator
   
   // Separators
   pipe: '|',

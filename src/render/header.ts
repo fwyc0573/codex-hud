@@ -5,7 +5,9 @@
  * Layout:
  * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
  * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
- * Row 3 (optional): ◐ Edit: file.ts | ✓ Read ×3
+ * Row 3: 🎫 Tokens: 12.5K | Ctx: ████░░░░ 45% (50K/128K)
+ * Row 4: Dir: ~/project | Session: abc12345
+ * Row 5 (optional): ◐ Edit: file.ts | ✓ Read ×3
  */
 
 import type { HudData, RenderOptions, LayoutConfig } from '../types.js';
@@ -16,6 +18,8 @@ import {
   renderProjectLine,
   renderEnvironmentLine,
   renderUsageLine,
+  renderTokenLine,
+  renderSessionDetailLine,
   collectActivityLines,
 } from './lines/index.js';
 
@@ -52,7 +56,9 @@ function renderCompactLayout(data: HudData, layout: LayoutConfig): string[] {
  * Render the expanded layout (multiple lines)
  * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
  * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
- * Row 3+: Activity lines (tools, todos)
+ * Row 3: 🎫 Tokens: 12.5K | Ctx: ████░░░░ 45% (50K/128K)
+ * Row 4: Dir: ~/project | Session: abc12345
+ * Row 5+: Activity lines (tools, todos)
  */
 function renderExpandedLayout(data: HudData, layout: LayoutConfig): string[] {
   const lines: string[] = [];
@@ -76,9 +82,27 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig): string[] {
     lines.push(envLine);
   }
   
-  // Row 3+: Activity lines (tools, todos)
+  // Row 3: Token usage and context progress bar (ALWAYS show if data available)
+  const tokenLine = renderTokenLine(data);
+  if (tokenLine) {
+    lines.push(tokenLine);
+  }
+  
+  // Row 4: Session details (directory, session ID, etc.)
+  const sessionLine = renderSessionDetailLine(data);
+  if (sessionLine) {
+    lines.push(sessionLine);
+  }
+  
+  // Row 5+: Activity lines (tools, todos) - but exclude token and session lines since we rendered them above
   const activityLines = collectActivityLines(data);
-  lines.push(...activityLines);
+  // Filter out token and session lines since we already rendered them
+  const filteredActivityLines = activityLines.filter(line => {
+    // Skip if it starts with token/ctx indicators or Dir:/Session: 
+    // (we already rendered these explicitly above)
+    return !line.includes('Tokens:') && !line.includes('Dir: ') && !line.includes('Session: ');
+  });
+  lines.push(...filteredActivityLines);
   
   return lines;
 }

@@ -6,6 +6,7 @@
 import type { HudData, RenderOptions, LayoutConfig, LayoutMode } from '../types.js';
 import { DEFAULT_LAYOUT } from '../types.js';
 import { renderHud } from './header.js';
+import { colors } from './colors.js';
 
 // ANSI escape codes for cursor/screen control
 const CURSOR_HOME = '\x1b[H';
@@ -18,21 +19,60 @@ const SHOW_CURSOR = '\x1b[?25h';
  * Get terminal width
  */
 export function getTerminalWidth(): number {
-  return process.stdout.columns || 80;
+  const stdoutColumns = process.stdout.columns;
+  if (Number.isFinite(stdoutColumns) && stdoutColumns > 0) {
+    return stdoutColumns;
+  }
+  const envColumns = process.env.COLUMNS ? Number(process.env.COLUMNS) : NaN;
+  if (Number.isFinite(envColumns) && envColumns > 0) {
+    return envColumns;
+  }
+  return 80;
 }
 
 /**
  * Get terminal height
  */
 export function getTerminalHeight(): number {
-  return process.stdout.rows || 24;
+  const stdoutRows = process.stdout.rows;
+  if (Number.isFinite(stdoutRows) && stdoutRows > 0) {
+    return stdoutRows;
+  }
+  const envLines = process.env.LINES ? Number(process.env.LINES) : NaN;
+  if (Number.isFinite(envLines) && envLines > 0) {
+    return envLines;
+  }
+  return 24;
+}
+
+/**
+ * Respect terminal height by trimming lines and adding a truncation indicator when necessary
+ */
+function limitLines(lines: string[], maxLines: number): string[] {
+  if (maxLines <= 0) {
+    return [];
+  }
+
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+
+  const limited = lines.slice(0, maxLines);
+  const truncatedCount = lines.length - maxLines;
+  const moreText =
+    truncatedCount === 1
+      ? '…1 more line hidden'
+      : `…${truncatedCount} more lines hidden`;
+  const indicator = colors.dim(moreText);
+  limited[limited.length - 1] = `${limited[limited.length - 1]} ${indicator}`;
+  return limited;
 }
 
 /**
  * Create default layout config based on terminal size
  */
 function createDefaultLayout(width: number, height: number): LayoutConfig {
-  const mode: LayoutMode = height <= 2 ? 'compact' : 'expanded';
+  const mode: LayoutMode = height <= 1 ? 'compact' : 'expanded';
   
   return {
     mode,
@@ -61,11 +101,12 @@ export function render(data: HudData): void {
   const layout = createDefaultLayout(width, height);
   const options: RenderOptions = {
     width,
-    showDetails: height >= 3,
+    showDetails: height >= 2,
     layout,
   };
   
-  const lines = renderHud(data, options);
+  const maxLines = Math.max(1, height);
+  const lines = limitLines(renderHud(data, options), maxLines);
   
   // Move cursor to home position and render
   process.stdout.write(CURSOR_HOME);
@@ -75,7 +116,7 @@ export function render(data: HudData): void {
   }
   
   // Clear any remaining lines from previous render
-  const remainingLines = height - lines.length;
+  const remainingLines = maxLines - lines.length;
   for (let i = 0; i < remainingLines; i++) {
     writeLine('');
   }
@@ -143,7 +184,8 @@ export function renderToStdout(data: HudData): void {
     layout,
   };
   
-  const lines = renderHud(data, options);
+  const maxLines = Math.max(1, height);
+  const lines = limitLines(renderHud(data, options), maxLines);
   
   // Clear screen and move to top
   process.stdout.write(CLEAR_SCREEN + CURSOR_HOME);

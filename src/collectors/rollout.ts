@@ -25,6 +25,9 @@ export interface RolloutParseResult {
   toolActivity: ToolActivity;
   planProgress: PlanProgress | null;
   tokenUsage: TokenUsageInfo | null;
+  // Compact event tracking
+  compactCount: number;
+  lastCompactTime: Date | null;
 }
 
 /**
@@ -79,13 +82,15 @@ export async function parseRolloutFile(
   let session: SessionInfo | null = null;
   let planProgress: PlanProgress | null = null;
   let tokenUsage: TokenUsageInfo | null = null;
+  let compactCount = 0;
+  let lastCompactTime: Date | null = null;
 
   // Track running tool calls by ID for duration calculation
   const runningCalls = new Map<string, ToolCall>();
 
   if (!fs.existsSync(rolloutPath)) {
     return {
-      result: { session, toolActivity, planProgress, tokenUsage },
+      result: { session, toolActivity, planProgress, tokenUsage, compactCount, lastCompactTime },
       newOffset: 0,
     };
   }
@@ -192,6 +197,17 @@ export async function parseRolloutFile(
             };
           } else if (payload.type === 'token_count' && payload.info) {
             tokenUsage = payload.info;
+          } else if (payload.type === 'context_compacted') {
+            // /compact command was executed - track it
+            compactCount++;
+            lastCompactTime = timestamp;
+          } else if (payload.type === 'turn_started' && payload.model_context_window) {
+            // New turn started - update context window if provided
+            if (!tokenUsage) {
+              tokenUsage = { model_context_window: payload.model_context_window };
+            } else {
+              tokenUsage.model_context_window = payload.model_context_window;
+            }
           }
         }
 
@@ -203,14 +219,14 @@ export async function parseRolloutFile(
 
     rl.on('close', () => {
       resolve({
-        result: { session, toolActivity, planProgress, tokenUsage },
+        result: { session, toolActivity, planProgress, tokenUsage, compactCount, lastCompactTime },
         newOffset: bytesRead,
       });
     });
 
     rl.on('error', () => {
       resolve({
-        result: { session, toolActivity, planProgress, tokenUsage },
+        result: { session, toolActivity, planProgress, tokenUsage, compactCount, lastCompactTime },
         newOffset: startOffset,
       });
     });
@@ -274,6 +290,24 @@ export class RolloutParser {
         ...result.toolActivity.recentCalls,
       ];
       result.toolActivity.recentCalls = allCalls.slice(-this.maxRecentCalls);
+
+      // Merge compact tracking
+      result.compactCount += this.cachedResult.compactCount;
+      if (!result.lastCompactTime && this.cachedResult.lastCompactTime) {
+        result.lastCompactTime = this.cachedResult.lastCompactTime;
+      }
+
+      // Keep tokenUsage from latest parse (it contains cumulative data from API)
+      // but preserve model_context_window if not in new result
+      if (this.cachedResult.tokenUsage?.model_context_window && result.tokenUsage) {
+        result.tokenUsage.model_context_window = 
+          result.tokenUsage.model_context_window ?? this.cachedResult.tokenUsage.model_context_window;
+      }
+
+      // Keep tokenUsage from latest parse if available, otherwise use cached
+      if (!result.tokenUsage && this.cachedResult.tokenUsage) {
+        result.tokenUsage = this.cachedResult.tokenUsage;
+      }
     }
 
     this.cachedResult = result;

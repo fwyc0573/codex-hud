@@ -33,6 +33,22 @@ detect_shell() {
     echo "$shell_name"
 }
 
+# Get zsh rc file location (respects ZDOTDIR when set)
+get_zsh_rc_file() {
+    if [[ -n "${ZDOTDIR:-}" ]]; then
+        if [[ ! -d "$ZDOTDIR" ]]; then
+            error "ZDOTDIR is set but does not exist: $ZDOTDIR"
+        fi
+        local rc_file="$ZDOTDIR/.zshrc"
+        if [[ -e "$rc_file" ]] && [[ ! -w "$rc_file" ]]; then
+            error "ZDOTDIR is set but rc file is not writable: $rc_file"
+        fi
+        echo "$rc_file"
+        return 0
+    fi
+    echo "$HOME/.zshrc"
+}
+
 # Get the RC file for a given shell
 get_rc_file() {
     local shell_name="$1"
@@ -47,7 +63,7 @@ get_rc_file() {
             fi
             ;;
         zsh)
-            echo "$HOME/.zshrc"
+            get_zsh_rc_file
             ;;
         fish)
             echo "$HOME/.config/fish/config.fish"
@@ -94,17 +110,59 @@ kill_sessions() {
                 info "Killed session: $session"
             done
         fi
+        
+        # Also kill any panes running the HUD renderer
+        step "Cleaning up HUD panes..."
+        for session in $(tmux list-sessions -F "#{session_name}" 2>/dev/null || true); do
+            # Find panes running the codex-hud node process
+            for pane in $(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_current_command}" 2>/dev/null || true); do
+                if [[ "$pane" == *"node"* ]] || [[ "$pane" == *"codex-hud"* ]]; then
+                    local pane_id="${pane%%:*}"
+                    # Check if this pane is running our HUD
+                    local pane_cmd
+                    pane_cmd=$(tmux display-message -p -t "$pane_id" "#{pane_start_command}" 2>/dev/null || true)
+                    if [[ "$pane_cmd" == *"codex-hud"* ]] || [[ "$pane_cmd" == *"dist/index.js"* ]]; then
+                        tmux kill-pane -t "$pane_id" 2>/dev/null || true
+                        info "Killed HUD pane: $pane_id"
+                    fi
+                fi
+            done
+        done
     fi
 }
 
-# Show backup info
-show_backup_info() {
+# Restore original codex alias from backup
+restore_backup() {
     if [[ -f "$BACKUP_FILE" ]]; then
-        echo ""
-        echo "Note: Your original codex alias was backed up to:"
-        echo "  ${CYAN}$BACKUP_FILE${NC}"
-        echo ""
-        echo "To restore it, copy the alias from that file to your shell config."
+        step "Restoring original codex alias from backup..."
+        
+        local shell_name
+        shell_name=$(detect_shell)
+        local rc_file
+        rc_file=$(get_rc_file "$shell_name")
+        
+        if [[ -n "$rc_file" ]] && [[ -f "$rc_file" ]]; then
+            # Append the backed up aliases to the rc file
+            echo "" >> "$rc_file"
+            echo "# Restored codex alias from codex-hud backup" >> "$rc_file"
+            cat "$BACKUP_FILE" >> "$rc_file"
+            info "Restored original alias to $rc_file"
+            
+            # Remove the backup file after restoration
+            rm -f "$BACKUP_FILE"
+            info "Removed backup file: $BACKUP_FILE"
+        fi
+    fi
+}
+
+# Clean up any fish-specific configuration
+cleanup_fish() {
+    local fish_config="$HOME/.config/fish/config.fish"
+    if [[ -f "$fish_config" ]]; then
+        if grep -q "$MARKER" "$fish_config" 2>/dev/null; then
+            step "Cleaning up fish configuration..."
+            remove_alias "$fish_config"
+        fi
     fi
 }
 
@@ -121,17 +179,22 @@ main() {
     local rc_file
     rc_file=$(get_rc_file "$shell_name")
     
-    # Kill existing sessions
+    # Kill existing sessions first (before removing aliases)
     kill_sessions
     
-    # Remove alias
+    # Remove alias from main RC file
     if [[ -n "$rc_file" ]]; then
         step "Removing alias from $rc_file..."
         remove_alias "$rc_file"
     fi
     
     # Also check other common RC files
-    local other_files=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc")
+    local bash_rc="$HOME/.bashrc"
+    local bash_profile="$HOME/.bash_profile"
+    local zsh_rc
+    zsh_rc=$(get_zsh_rc_file)
+    
+    local other_files=("$bash_rc" "$bash_profile" "$zsh_rc")
     for file in "${other_files[@]}"; do
         if [[ "$file" != "$rc_file" ]] && [[ -f "$file" ]]; then
             if grep -q "$MARKER" "$file" 2>/dev/null; then
@@ -140,6 +203,12 @@ main() {
             fi
         fi
     done
+    
+    # Clean up fish configuration if exists
+    cleanup_fish
+    
+    # Restore original codex alias from backup
+    restore_backup
     
     header "Uninstall Complete! 🧹"
     echo "The codex-hud alias has been removed."
@@ -150,7 +219,13 @@ main() {
     echo ""
     echo "The 'codex' command will now use the original Codex CLI."
     
-    show_backup_info
+    if [[ -f "$BACKUP_FILE" ]]; then
+        echo ""
+        echo "Note: Your original codex alias was backed up to:"
+        echo "  ${CYAN}$BACKUP_FILE${NC}"
+        echo ""
+        echo "To restore it manually, copy the alias from that file to your shell config."
+    fi
     
     echo ""
     echo "To completely remove codex-hud, you can delete this directory:"

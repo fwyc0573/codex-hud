@@ -48,6 +48,7 @@ function createMockData(options: {
     inputTokens: Math.floor(used * 0.7),
     outputTokens: Math.floor(used * 0.3),
     cachedTokens: Math.floor(used * 0.2),
+    compactCount: 0,  // No compactions in test data
   } : undefined;
 
   // Create tool activity if requested

@@ -5,7 +5,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { getCodexHome, getSessionsDir } from '../utils/codex-path.js';
+
+const DEFAULT_LOOKBACK_DAYS = 30;
 
 export interface SessionFile {
   path: string;
@@ -15,18 +17,59 @@ export interface SessionFile {
   modifiedAt: Date;
 }
 
-/**
- * Get the Codex home directory
- */
-export function getCodexHome(): string {
-  return process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
-}
+export { getCodexHome, getSessionsDir };
 
 /**
- * Get the sessions directory
+ * Peek at the first line of a rollout file to get its CWD
  */
-export function getSessionsDir(): string {
-  return path.join(getCodexHome(), 'sessions');
+function readFirstLine(filePath: string, maxBytes: number = 1024 * 1024): string | null {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const bufferSize = 4096;
+    const buffer = Buffer.alloc(bufferSize);
+    let bytesReadTotal = 0;
+    let line = '';
+
+    while (bytesReadTotal < maxBytes) {
+      const bytesRead = fs.readSync(fd, buffer, 0, bufferSize, bytesReadTotal);
+      if (bytesRead <= 0) {
+        break;
+      }
+      bytesReadTotal += bytesRead;
+
+      const chunk = buffer.toString('utf8', 0, bytesRead);
+      const newlineIndex = chunk.indexOf('\n');
+      if (newlineIndex !== -1) {
+        line += chunk.slice(0, newlineIndex);
+        return line;
+      }
+
+      line += chunk;
+    }
+
+    if (bytesReadTotal >= maxBytes) {
+      throw new Error(`Rollout first line exceeds ${maxBytes} bytes: ${filePath}`);
+    }
+
+    return line.length > 0 ? line : null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function peekRolloutCwd(filePath: string): string | null {
+  try {
+    const firstLine = readFirstLine(filePath);
+    if (!firstLine) return null;
+
+    const entry = JSON.parse(firstLine.trim());
+    if (entry.type === 'session_meta' && entry.payload) {
+      return entry.payload.cwd;
+    }
+  } catch {
+    // Ignore errors or malformed files
+  }
+  return null;
 }
 
 /**
@@ -105,7 +148,10 @@ function findRolloutsInDir(dirPath: string): SessionFile[] {
  * Find the most recent rollout file
  * Searches backwards from today's date
  */
-export function findMostRecentRollout(maxDaysBack: number = 7): SessionFile | null {
+export function findMostRecentRollout(
+  maxDaysBack: number = DEFAULT_LOOKBACK_DAYS,
+  targetCwd?: string
+): SessionFile | null {
   const sessionsDir = getSessionsDir();
 
   if (!fs.existsSync(sessionsDir)) {
@@ -126,7 +172,15 @@ export function findMostRecentRollout(maxDaysBack: number = 7): SessionFile | nu
 
     const dayDir = path.join(sessionsDir, year, month, day);
     const rolloutsInDay = findRolloutsInDir(dayDir);
-    allSessions = allSessions.concat(rolloutsInDay);
+    
+    // Filter by CWD if provided
+    let sessions = rolloutsInDay;
+    if (targetCwd) {
+      sessions = sessions.filter(r => peekRolloutCwd(r.path) === targetCwd);
+    }
+    
+    allSessions = allSessions.concat(sessions);
+    
   }
 
   if (allSessions.length === 0) {
@@ -143,7 +197,11 @@ export function findMostRecentRollout(maxDaysBack: number = 7): SessionFile | nu
  * Find rollout files modified within the last N seconds
  * Useful for finding actively-used sessions
  */
-export function findActiveRollouts(withinSeconds: number = 60): SessionFile[] {
+export function findActiveRollouts(
+  withinSeconds: number = 60,
+  targetCwd?: string,
+  maxDaysBack: number = DEFAULT_LOOKBACK_DAYS
+): SessionFile[] {
   const sessionsDir = getSessionsDir();
 
   if (!fs.existsSync(sessionsDir)) {
@@ -153,34 +211,40 @@ export function findActiveRollouts(withinSeconds: number = 60): SessionFile[] {
   const now = new Date();
   const cutoff = new Date(now.getTime() - withinSeconds * 1000);
 
-  // Only search today's directory for active sessions
-  const year = now.getFullYear().toString();
-  const month = (now.getMonth() + 1).toString().padStart(2, '0');
-  const day = now.getDate().toString().padStart(2, '0');
+  let rollouts: SessionFile[] = [];
+  for (let daysAgo = 0; daysAgo <= maxDaysBack; daysAgo++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - daysAgo);
 
-  const todayDir = path.join(sessionsDir, year, month, day);
-  const rolloutsToday = findRolloutsInDir(todayDir);
+    const year = date.getFullYear().toString();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
 
-  // Filter to recently modified
-  return rolloutsToday
-    .filter((r) => r.modifiedAt >= cutoff)
+    const dayDir = path.join(sessionsDir, year, month, day);
+    rollouts = rollouts.concat(findRolloutsInDir(dayDir));
+  }
+
+  // Filter to recently modified and CWD
+  return rollouts
+    .filter((r) => {
+      if (r.modifiedAt < cutoff) return false;
+      if (targetCwd && peekRolloutCwd(r.path) !== targetCwd) return false;
+      return true;
+    })
     .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
 }
 
 /**
- * Find a rollout file by session ID
- */
-/**
  * Find an active session (convenience wrapper)
  * Returns the path to the most recently modified rollout file
  */
-export async function findActiveSession(): Promise<string | null> {
-  const active = findActiveRollouts(60);
+export async function findActiveSession(targetCwd?: string): Promise<string | null> {
+  const active = findActiveRollouts(60, targetCwd, DEFAULT_LOOKBACK_DAYS);
   if (active.length > 0) {
     return active[0].path;
   }
   
-  const recent = findMostRecentRollout(1);
+  const recent = findMostRecentRollout(DEFAULT_LOOKBACK_DAYS, targetCwd);
   return recent?.path ?? null;
 }
 
@@ -227,8 +291,14 @@ export function findRolloutBySessionId(
 export class SessionFinder {
   private currentSession: SessionFile | null = null;
   private checkInterval: NodeJS.Timeout | null = null;
+  private targetCwd: string | null = null;
 
-  constructor(private onSessionChange?: (session: SessionFile | null) => void) {}
+  constructor(
+    targetCwd?: string,
+    private onSessionChange?: (session: SessionFile | null) => void
+  ) {
+    this.targetCwd = targetCwd || null;
+  }
 
   /**
    * Start watching for session changes
@@ -253,7 +323,7 @@ export class SessionFinder {
    */
   check(): SessionFile | null {
     // First, look for actively modified sessions (within last 60s)
-    const active = findActiveRollouts(60);
+    const active = findActiveRollouts(60, this.targetCwd || undefined, DEFAULT_LOOKBACK_DAYS);
     if (active.length > 0) {
       const newest = active[0];
       if (
@@ -268,7 +338,7 @@ export class SessionFinder {
     }
 
     // Fall back to most recent rollout
-    const recent = findMostRecentRollout(1);
+    const recent = findMostRecentRollout(DEFAULT_LOOKBACK_DAYS, this.targetCwd || undefined);
     if (recent) {
       if (!this.currentSession || this.currentSession.path !== recent.path) {
         this.currentSession = recent;

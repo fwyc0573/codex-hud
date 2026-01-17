@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes                          |
+|------------|---------------------------------------------|
+| 2026-01-18 | Sync README with current HUD behavior and paths |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -12,9 +18,7 @@ Real-time statusline HUD for OpenAI Codex CLI.
 ## Quick Start (One Command Install)
 
 ```bash
-# Clone and install
-git clone https://github.com/your-repo/codex-hud.git
-cd codex-hud
+# From the repository root
 ./install.sh
 
 # Now just type 'codex' - HUD appears automatically!
@@ -25,19 +29,19 @@ That's it! After installation, typing `codex` will automatically launch with the
 ## Features
 
 ### Phase 1 (Basic)
-- **Model Display**: Shows current model from `~/.codex/config.toml`
-- **Git Status**: Branch name and dirty state indicator
-- **Project Info**: Current directory and project name
+- **Model Display**: Shows current model from `config.toml`
+- **Git Status**: Branch, dirty indicator, ahead/behind, and change counts
+- **Project Info**: Project name and working directory
 - **Session Timer**: Time since session started
-- **MCP Servers**: Count of configured MCP servers
-- **Approval Policy**: Current approval policy setting
-- **AGENTS.md Detection**: Count of AGENTS.md files in project
+- **Config/Mode Signals**: `.codex` config count, work mode, and extensions (MCP servers)
+- **Instruction Signals**: Counts for AGENTS.md, INSTRUCTIONS.md, and `.codex/rules`
+- **Approval Policy + Sandbox**: Displays approval policy and sandbox mode when configured
 
 ### Phase 2 (Advanced) ✨ NEW
-- **Token Usage**: Real-time token consumption with progress bar
-  - Reads from session rollout files (`~/.codex/sessions/`)
-  - Shows input/output token counts
-  - Visual progress bar with color coding
+- **Token + Context Usage**: Real-time token and context window usage
+  - Reads `token_count` and `turn_started` events from rollout files
+  - Uses `last_token_usage` with baseline token reservation
+  - Shows `/compact` count from `context_compacted` events
 - **Tool Activity Tracking**: Monitors tool invocations
   - Shows recent tool calls count
   - Displays total tool calls in session
@@ -46,13 +50,13 @@ That's it! After installation, typing `codex` will automatically launch with the
   - Watches config.toml for changes
   - Watches active session rollout files
 - **Session Auto-Detection**: Automatically finds active Codex sessions
-  - Searches `~/.codex/sessions/` directory structure
+  - Filters by session CWD and searches recent sessions (default: 30 days)
   - Prioritizes recently modified sessions
 
 ### Phase 3 (Seamless Integration) ✨ NEW
 - **Automatic tmux Installation**: Installs tmux if not present
-- **Shell Alias Integration**: `codex` command automatically launches with HUD
-- **Session Reuse**: Same directory reuses existing tmux session
+- **Shell Alias Integration**: `codex` and `codex-resume` launch with HUD
+- **Per-Launch Sessions**: Each run creates a new tmux session and auto-cleans on exit
 - **Configurable HUD Position**: Top or bottom (environment variable)
 - **One-Command Install/Uninstall**: Simple setup and removal
 
@@ -61,16 +65,13 @@ That's it! After installation, typing `codex` will automatically launch with the
 - **Node.js** 18+
 - **OpenAI Codex CLI** installed and in PATH
 - **tmux** (auto-installed if missing)
+- **Codex home** available at `CODEX_HOME`, `~/.codex`, or `~/.codex_home` (with a `sessions/` directory or `CODEX_SESSIONS_PATH`)
 
 ## Installation
 
 ### Recommended: Automatic Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-repo/codex-hud.git
-cd codex-hud
-
 # Run the installer
 ./install.sh
 ```
@@ -78,7 +79,7 @@ cd codex-hud
 The installer will:
 1. Install Node.js dependencies
 2. Build the TypeScript project
-3. Add a shell alias so `codex` → `codex-hud`
+3. Add shell aliases (`codex`, `codex-resume`) to `~/.bashrc` and `~/.zshrc` (with backups)
 4. Prompt to install tmux if not present
 
 ### Manual Installation
@@ -98,6 +99,7 @@ chmod +x bin/codex-hud
 
 # Add alias to your shell config (~/.bashrc or ~/.zshrc)
 echo "alias codex='/path/to/codex-hud/bin/codex-hud'" >> ~/.bashrc
+echo "alias codex-resume='/path/to/codex-hud/bin/codex-hud resume'" >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -108,9 +110,9 @@ source ~/.bashrc
 ```
 
 This will:
-- Remove the shell alias
-- Kill any running codex-hud sessions
-- Show location of backed-up original alias (if any)
+- Remove the codex-hud aliases from common shell rc files
+- Kill any running codex-hud sessions and HUD panes
+- Restore backed-up aliases if available
 
 ## Usage
 
@@ -125,6 +127,9 @@ codex --model gpt-5
 
 # With initial prompt
 codex "help me debug this"
+
+# Resume (passes through to codex CLI)
+codex-resume
 ```
 
 ### Additional Commands
@@ -138,6 +143,9 @@ codex-hud --list
 
 # Show help
 codex-hud --help
+
+# Run environment diagnostics
+codex-hud --self-check
 ```
 
 ### Environment Variables
@@ -145,8 +153,16 @@ codex-hud --help
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CODEX_HUD_POSITION` | HUD pane position: `bottom`, `top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD pane height in lines | `3` |
+| `CODEX_HUD_HEIGHT` | HUD pane height in lines | 25% of terminal height (min 3) |
 | `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
+| `CODEX_HUD_CWD` | Override working directory used for HUD context/session matching | (unset; wrapper sets) |
+
+### Path Overrides
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CODEX_HOME` | Codex home directory (config + sessions) | `~/.codex` or `~/.codex_home` |
+| `CODEX_SESSIONS_PATH` | Override sessions directory | (unset) |
 
 Example:
 ```bash
@@ -157,39 +173,57 @@ CODEX_HUD_POSITION=top codex
 CODEX_HUD_HEIGHT=5 codex
 ```
 
+Note: HUD height is clamped to the available terminal size.
+
 ## Display Format
 
 The wrapper creates a tmux session with:
-- **Main pane** (90%): Codex CLI
-- **HUD pane** (10%): Status bar
+- **Main pane**: Codex CLI
+- **HUD pane**: Status lines (expanded layout shows multiple lines; compact layout shows one line)
 
 ```
-[gpt-5.2-codex] │ my-project git:(main) ● │ ⏱️ 12m │ 🎫 ████░░░░ 50.2K/12.5K
-MCP: 3 │ Approval: on-req │ AGENTS.md: 2
-Tools: ✓ 15 (234 total)
+[gpt-5.2-codex] █████░░░░ 45% │ my-project git:(main ●) │ ⏱️ 12m
+1 configs | mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
+🎫 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
+◐ Edit: file.ts | ✓ Read ×3
 ```
 
 ### Line 1: Header
 - `[model-name]` - Current model
+- `█████░░░░ 45%` - Context usage bar (from session token data)
 - `project-name` - Current directory name
-- `git:(branch)` - Git branch (if in repo)
-- `●` - Dirty indicator (uncommitted changes)
+- `git:(branch ●)` - Git branch + dirty indicator (if in repo)
 - `⏱️ duration` - Session duration
-- `🎫 progress input/output` - Token usage with progress bar
 
-### Line 2: Details
-- `MCP: N` - Number of enabled MCP servers
+### Line 2: Environment
+- `N configs` - `.codex` config file count
+- `mode: dev/prod` - Work mode from environment
+- `N extensions` - Enabled MCP servers
+- `N AGENTS.md` / `N INSTRUCTIONS.md` / `N rules` - Instruction signals
 - `Approval: policy` - Approval policy
-- `AGENTS.md: N` - Count of AGENTS.md files
 - `Sandbox: mode` - Sandbox mode (if configured)
 
-### Line 3: Activity
-- `Tools: ✓ N` - Recent tool calls (completed)
-- `(N total)` - Total tool calls in session
+### Line 3: Tokens + Context
+- `Tokens: N` - Total tokens (with input/cache/output breakdown when available)
+- `Ctx: ███░░ 45% (used/total)` - Context usage bar and counts
+- `↻N` - Compact count when `/compact` events occur
+
+### Line 4: Session Details
+- `Dir: ~/path` - Working directory (truncated)
+- `Session: abc12345` - Session ID (short)
+- `CLI: x.y.z` / `Provider: openai` - Optional session metadata
+
+### Line 5+: Activity
+- `◐ Edit: file.ts` - Running tool call
+- `✓ Read ×3` - Recent tool calls grouped with counts
+- Plan progress lines when available
+
+When the HUD height is smaller than the number of available lines, extra lines are trimmed with a `…N more lines hidden` indicator.
 
 ## Configuration
 
-The HUD reads configuration from `~/.codex/config.toml`.
+The HUD reads configuration from `CODEX_HOME/config.toml` (defaults to `~/.codex/config.toml`, with fallback to `~/.codex_home/config.toml`).
 
 ### Supported Fields
 
@@ -215,9 +249,9 @@ enabled = true
 
 ### Token Usage (Phase 2)
 Token data is extracted from Codex session rollout files:
-- Location: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
-- Format: JSONL with `event_msg` entries containing `token_count` events
-- Fields: `input_tokens`, `output_tokens`, `cached_input_tokens`
+- Location: `CODEX_SESSIONS_PATH` or `${CODEX_HOME:-~/.codex}/sessions/YYYY/MM/DD/rollout-*.jsonl`
+- Format: JSONL with `event_msg` entries containing `token_count`, `turn_started`, and `context_compacted`
+- Fields: `total_token_usage`, `last_token_usage`, `model_context_window`, `cached_input_tokens`
 
 ### Tool Activity (Phase 2)
 Tool invocations are tracked from rollout files:
@@ -233,18 +267,28 @@ codex-hud/
 │   └── codex-hud              # Bash wrapper (creates tmux session)
 ├── src/
 │   ├── index.ts               # Main entry point
+│   ├── test-render.ts         # Render test harness
 │   ├── types.ts               # Type definitions
+│   ├── utils/
+│   │   └── codex-path.ts      # Resolve CODEX_HOME + sessions path
 │   ├── collectors/
-│   │   ├── codex-config.ts    # Parse ~/.codex/config.toml
+│   │   ├── codex-config.ts    # Parse config.toml
+│   │   ├── file-watcher.ts    # chokidar-based watchers
 │   │   ├── git.ts             # Git status collection
 │   │   ├── project.ts         # Project info collection
-│   │   ├── rollout.ts         # Parse session rollout files (Phase 2)
-│   │   ├── session-finder.ts  # Find active sessions (Phase 2)
-│   │   └── file-watcher.ts    # chokidar-based watchers (Phase 2)
+│   │   ├── rollout.ts         # Parse session rollout files
+│   │   └── session-finder.ts  # Find active sessions
 │   └── render/
 │       ├── colors.ts          # ANSI color utilities
 │       ├── header.ts          # Status line rendering
-│       └── index.ts           # Main renderer
+│       ├── index.ts           # Main renderer
+│       └── lines/             # Line renderers
+│           ├── activity-line.ts
+│           ├── environment-line.ts
+│           ├── identity-line.ts
+│           ├── project-line.ts
+│           ├── session-line.ts
+│           └── usage-line.ts
 ├── dist/                      # Compiled JavaScript
 ├── package.json
 └── tsconfig.json
@@ -270,7 +314,7 @@ node dist/index.js
 
 1. **Token usage accuracy**: Depends on Codex session rollout format
 2. **Requires tmux**: The split-pane display needs tmux
-3. **Wrapper launch required**: Must use `codex-hud` instead of `codex` directly
+3. **Wrapper launch required**: Use `codex-hud` (or the `codex`/`codex-resume` aliases) to see the HUD
 4. **Session detection delay**: Up to 5 seconds to detect new sessions
 
 ## Changelog

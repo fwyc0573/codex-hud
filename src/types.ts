@@ -4,6 +4,16 @@
  */
 
 // ============================================================================
+// Constants (matching openai/codex protocol)
+// ============================================================================
+
+/**
+ * Baseline tokens reserved for system prompts, tools and space to call compact.
+ * This matches the BASELINE_TOKENS constant in codex-rs/protocol/src/protocol.rs
+ */
+export const BASELINE_TOKENS = 12000;
+
+// ============================================================================
 // Configuration Types
 // ============================================================================
 
@@ -69,6 +79,9 @@ export interface ContextUsage {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  // Compact tracking
+  compactCount: number;
+  lastCompactTime?: Date;
 }
 
 // ============================================================================
@@ -142,11 +155,24 @@ export interface FunctionOutput {
 }
 
 export interface EventMsgPayload {
-  type: 'plan_update' | 'token_count' | 'rate_limit' | 'other';
+  type: 'plan_update' | 'token_count' | 'rate_limit' | 'context_compacted' | 'turn_started' | 'other';
   explanation?: string;
   plan?: PlanStep[];
   info?: TokenUsageInfo;
   rate_limits?: RateLimitSnapshot;
+  // For context_compacted events
+  compacted_items?: CompactedItem[];
+  summary?: string;
+  // For turn_started events
+  model_context_window?: number;
+}
+
+/**
+ * Represents an item that was compacted/summarized during /compact
+ */
+export interface CompactedItem {
+  type: string;
+  id?: string;
 }
 
 export interface PlanStep {

@@ -23,7 +23,7 @@ function formatTokenCount(count: number): string {
 
 /**
  * Render context breakdown (shown when usage >= 85%)
- * Format: (in: 135K, cache: 2K)
+ * Format: (in: 135K, cache: 2K, ↻2)
  */
 function renderContextBreakdown(context: ContextUsage): string {
   const parts: string[] = [];
@@ -33,6 +33,10 @@ function renderContextBreakdown(context: ContextUsage): string {
   }
   if (context.cachedTokens > 0) {
     parts.push(`cache: ${formatTokenCount(context.cachedTokens)}`);
+  }
+  // Show compact count if any compactions occurred
+  if (context.compactCount && context.compactCount > 0) {
+    parts.push(`${icons.refresh}${context.compactCount}`);
   }
   
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';

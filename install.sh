@@ -6,13 +6,13 @@
 set -e
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +23,7 @@ MARKER="# codex-hud alias"
 # Print functions
 error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
 warn() { echo -e "${YELLOW}Warning:${NC} $1" >&2; }
-info() { echo -e "${GREEN}✓${NC} $1"; }
+info() { echo -e "${GREEN}[OK]${NC} $1"; }
 step() { echo -e "${BLUE}==>${NC} $1"; }
 header() { echo -e "\n${BOLD}${CYAN}$1${NC}\n"; }
 
@@ -165,21 +165,31 @@ detect_shell() {
     echo "$shell_name"
 }
 
+# Get zsh rc file location (respects ZDOTDIR when set)
+get_zsh_rc_file() {
+    if [[ -n "${ZDOTDIR:-}" ]]; then
+        if [[ ! -d "$ZDOTDIR" ]]; then
+            error "ZDOTDIR is set but does not exist: $ZDOTDIR"
+        fi
+        local rc_file="$ZDOTDIR/.zshrc"
+        if [[ -e "$rc_file" ]] && [[ ! -w "$rc_file" ]]; then
+            error "ZDOTDIR is set but rc file is not writable: $rc_file"
+        fi
+        echo "$rc_file"
+        return 0
+    fi
+    echo "$HOME/.zshrc"
+}
+
 # Get the RC file for a given shell
 get_rc_file() {
     local shell_name="$1"
     case "$shell_name" in
         bash)
-            if [[ -f "$HOME/.bashrc" ]]; then
-                echo "$HOME/.bashrc"
-            elif [[ -f "$HOME/.bash_profile" ]]; then
-                echo "$HOME/.bash_profile"
-            else
-                echo "$HOME/.bashrc"
-            fi
+            echo "$HOME/.bashrc"
             ;;
         zsh)
-            echo "$HOME/.zshrc"
+            get_zsh_rc_file
             ;;
         fish)
             echo "$HOME/.config/fish/config.fish"
@@ -190,27 +200,35 @@ get_rc_file() {
     esac
 }
 
-# Backup existing codex alias if present
-backup_existing_alias() {
+# Backup existing codex aliases if present
+backup_existing_aliases() {
     local rc_file="$1"
     
     if [[ ! -f "$rc_file" ]]; then
         return 0
     fi
     
-    # Check for existing codex alias (not ours)
-    local existing_alias
-    existing_alias=$(grep "^alias codex=" "$rc_file" 2>/dev/null | grep -v "$MARKER" || true)
+    local existing_aliases=""
+    local codex_alias
+    local resume_alias
+    codex_alias=$(grep "^alias codex=" "$rc_file" 2>/dev/null | grep -v "$MARKER" || true)
+    resume_alias=$(grep "^alias codex-resume=" "$rc_file" 2>/dev/null | grep -v "$MARKER" || true)
     
-    if [[ -n "$existing_alias" ]]; then
-        warn "Found existing 'codex' alias in $rc_file"
-        echo "$existing_alias" >> "$BACKUP_FILE"
+    if [[ -n "$codex_alias" ]]; then
+        existing_aliases+="$codex_alias"$'\n'
+    fi
+    if [[ -n "$resume_alias" ]]; then
+        existing_aliases+="$resume_alias"$'\n'
+    fi
+    
+    if [[ -n "$existing_aliases" ]]; then
+        warn "Found existing codex alias entries in $rc_file"
+        echo "$existing_aliases" >> "$BACKUP_FILE"
         info "Backed up to $BACKUP_FILE"
         
-        # Remove the old alias
         local temp_file
         temp_file=$(mktemp)
-        grep -v "^alias codex=" "$rc_file" > "$temp_file" || true
+        grep -v "^alias codex=" "$rc_file" | grep -v "^alias codex-resume=" > "$temp_file" || true
         mv "$temp_file" "$rc_file"
     fi
 }
@@ -231,8 +249,8 @@ add_alias() {
         return 0
     fi
     
-    # Backup existing alias
-    backup_existing_alias "$rc_file"
+    # Backup existing aliases
+    backup_existing_aliases "$rc_file"
     
     # Add our alias
     echo "" >> "$rc_file"
@@ -240,9 +258,11 @@ add_alias() {
     if [[ "$shell_name" == "fish" ]]; then
         # Fish uses different alias syntax
         echo "alias codex '$WRAPPER_PATH'  $MARKER" >> "$rc_file"
+        echo "alias codex-resume '$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
     else
         # Bash/Zsh syntax
         echo "alias codex='$WRAPPER_PATH'  $MARKER" >> "$rc_file"
+        echo "alias codex-resume='$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
     fi
     
     info "Added alias to $rc_file"
@@ -279,32 +299,30 @@ main() {
     # Setup wrapper
     setup_wrapper
     
-    # Detect shell and configure alias
+    # Detect shell and configure aliases for bash and zsh
     local shell_name
     shell_name=$(detect_shell)
     step "Detected shell: $shell_name"
     
-    local rc_file
-    rc_file=$(get_rc_file "$shell_name")
+    local bash_rc="$HOME/.bashrc"
+    local zsh_rc
+    zsh_rc=$(get_zsh_rc_file)
     
-    if [[ -z "$rc_file" ]]; then
-        warn "Unknown shell: $shell_name"
-        warn "Please add this alias to your shell config manually:"
-        echo ""
-        echo "  alias codex='$WRAPPER_PATH'"
-        echo ""
-    else
-        step "Configuring alias in $rc_file..."
-        add_alias "$rc_file" "$shell_name"
-    fi
+    step "Configuring aliases in $bash_rc..."
+    add_alias "$bash_rc" "bash"
     
-    header "Installation Complete! 🎉"
+    step "Configuring aliases in $zsh_rc..."
+    add_alias "$zsh_rc" "zsh"
+    
+    header "Installation Complete!"
     echo "To start using codex-hud, either:"
     echo ""
     echo "  1. Open a new terminal, or"
-    echo "  2. Run: ${CYAN}source $rc_file${NC}"
+    echo "  2. Run: ${CYAN}source $bash_rc${NC} (bash)"
+    echo "     or: ${CYAN}source $zsh_rc${NC} (zsh)"
     echo ""
     echo "Then just type ${GREEN}codex${NC} to start Codex with the HUD!"
+    echo "Or use ${GREEN}codex-resume${NC} to resume with the HUD wrapper."
     echo ""
     echo "Configuration options:"
     echo "  ${CYAN}CODEX_HUD_POSITION=top${NC}    - Put HUD on top"

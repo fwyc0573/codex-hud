@@ -10,7 +10,7 @@ Real-time statusline HUD for OpenAI Codex CLI.
 
 ```bash
 # Clone and install
-git clone https://github.com/your-repo/codex-hud.git
+git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 ./install.sh
 

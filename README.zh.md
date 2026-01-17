@@ -10,7 +10,7 @@ OpenAI Codex CLI 的实时状态栏 HUD。
 
 ```bash
 # From the repository root
-git clone https://github.com/your-repo/codex-hud.git
+git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 ./install.sh
 

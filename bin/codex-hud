@@ -19,6 +19,34 @@ HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 SESSION_MODE="${CODEX_HUD_SESSION_MODE:-unique}"
 TMUX_MOUSE="${CODEX_HUD_TMUX_MOUSE:-on}"
 
+# Escape a single shell argument safely.
+shell_escape() {
+    local value="$1"
+    value=$(printf '%s' "$value" | sed "s/'/'\"'\"'/g")
+    printf "'%s'" "$value"
+}
+
+# Hash the working directory for shared session names (macOS-friendly).
+hash_cwd() {
+    local input="$1"
+    local hash=""
+
+    if command -v md5sum >/dev/null 2>&1; then
+        hash=$(printf '%s' "$input" | md5sum | awk '{print $1}')
+    elif command -v md5 >/dev/null 2>&1; then
+        hash=$(printf '%s' "$input" | md5)
+        hash="${hash##* }"
+    elif command -v shasum >/dev/null 2>&1; then
+        hash=$(printf '%s' "$input" | shasum -a 256 | awk '{print $1}')
+    fi
+
+    if [[ -n "$hash" ]]; then
+        echo "${hash:0:8}"
+    else
+        echo "$$"
+    fi
+}
+
 # Check for bypass mode - run original codex directly without HUD
 if [[ -n "${CODEX_HUD_BYPASS:-}" ]]; then
     exec command codex "$@"
@@ -88,7 +116,7 @@ find_real_codex() {
 REAL_CODEX_PATH=$(find_real_codex)
 
 # Generate session name. "shared" reuses per-directory sessions, "unique" always creates new.
-SESSION_BASE="codex-hud-$(echo "$PWD" | md5sum 2>/dev/null | cut -c1-8 || echo "$$")"
+SESSION_BASE="codex-hud-$(hash_cwd "$PWD")"
 if [[ "$SESSION_MODE" == "shared" ]]; then
     SESSION_NAME="$SESSION_BASE"
 else
@@ -304,28 +332,35 @@ create_session() {
     term_height=$(tput lines 2>/dev/null || echo 24)
     term_width=$(tput cols 2>/dev/null || echo 80)
     
+    local escaped_cwd
+    escaped_cwd=$(shell_escape "$cwd")
+
     # Build the codex command string
     # Use the real codex path or 'command codex' to bypass any shell aliases
     # This prevents infinite recursion if user has aliased codex to codex-hud
     local codex_cmd
     if [[ -n "$REAL_CODEX_PATH" ]]; then
-        codex_cmd="'$REAL_CODEX_PATH'"
+        codex_cmd=$(shell_escape "$REAL_CODEX_PATH")
     else
         codex_cmd="command codex"
     fi
     if [[ ${#codex_args[@]} -gt 0 ]]; then
         # Properly quote arguments
         for arg in "${codex_args[@]}"; do
-            codex_cmd="$codex_cmd '$arg'"
+            codex_cmd="$codex_cmd $(shell_escape "$arg")"
         done
     fi
     
     # Wrap codex command to kill tmux session when codex exits
     # This ensures the session is cleaned up when user exits codex (Ctrl+C or normal exit)
-    local wrapped_codex_cmd="cd '$cwd' && $codex_cmd; tmux kill-session -t '$SESSION_NAME' 2>/dev/null || true"
+    local escaped_session
+    escaped_session=$(shell_escape "$SESSION_NAME")
+    local wrapped_codex_cmd="cd $escaped_cwd && $codex_cmd; tmux kill-session -t $escaped_session 2>/dev/null || true"
     
     # HUD command
-    local hud_cmd="cd '$cwd' && CODEX_HUD_CWD='$cwd' CODEX_HUD_SESSION_START='$SESSION_START_TS' node '$HUD_DIR/dist/index.js'"
+    local hud_path
+    hud_path=$(shell_escape "$HUD_DIR/dist/index.js")
+    local hud_cmd="cd $escaped_cwd && CODEX_HUD_CWD=$escaped_cwd CODEX_HUD_SESSION_START=$(shell_escape "$SESSION_START_TS") node $hud_path"
     
     # Create new detached session with the HUD pane first
     # This ensures codex gets the main interactive pane
@@ -361,23 +396,28 @@ create_window_in_current_session() {
     shift
     local codex_args=("$@")
     
+    local escaped_cwd
+    escaped_cwd=$(shell_escape "$cwd")
+
     # Build the codex command string
     # Use the real codex path or 'command codex' to bypass any shell aliases
     # This prevents infinite recursion if user has aliased codex to codex-hud
     local codex_cmd
     if [[ -n "$REAL_CODEX_PATH" ]]; then
-        codex_cmd="'$REAL_CODEX_PATH'"
+        codex_cmd=$(shell_escape "$REAL_CODEX_PATH")
     else
         codex_cmd="command codex"
     fi
     if [[ ${#codex_args[@]} -gt 0 ]]; then
         for arg in "${codex_args[@]}"; do
-            codex_cmd="$codex_cmd '$arg'"
+            codex_cmd="$codex_cmd $(shell_escape "$arg")"
         done
     fi
     
     # HUD command
-    local hud_cmd="cd '$cwd' && CODEX_HUD_CWD='$cwd' CODEX_HUD_SESSION_START='$SESSION_START_TS' node '$HUD_DIR/dist/index.js'"
+    local hud_path
+    hud_path=$(shell_escape "$HUD_DIR/dist/index.js")
+    local hud_cmd="cd $escaped_cwd && CODEX_HUD_CWD=$escaped_cwd CODEX_HUD_SESSION_START=$(shell_escape "$SESSION_START_TS") node $hud_path"
     
     # Create a new window in the current session
     local window_name="codex-hud"
@@ -388,7 +428,7 @@ create_window_in_current_session() {
     window_index=$(tmux display-message -p '#{window_index}')
     
     # Wrap codex command to close the window when codex exits
-    local wrapped_codex_cmd="cd '$cwd' && $codex_cmd; tmux kill-window -t :$window_index 2>/dev/null || true"
+    local wrapped_codex_cmd="cd $escaped_cwd && $codex_cmd; tmux kill-window -t :$window_index 2>/dev/null || true"
     
     # Send codex command to the new window
     tmux send-keys "$wrapped_codex_cmd" C-m
@@ -568,6 +608,14 @@ case "${1:-}" in
         exit 0
         ;;
 esac
+
+# Allow sourcing for tests without running main.
+if [[ -n "${CODEX_HUD_LIB_ONLY:-}" ]]; then
+    if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+        return 0
+    fi
+    exit 0
+fi
 
 # Run main
 main "$@"

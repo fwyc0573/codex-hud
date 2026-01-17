@@ -3,21 +3,40 @@
  * Detects running status of configured MCP servers
  */
 
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import type { CodexConfig, McpServerConfig, McpStatusSummary, McpServerRunStatus } from '../types.js';
 
 /**
  * Check if a process is running by searching for command pattern
  */
+function escapePgrepPattern(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildPgrepPattern(command: string[]): string {
+    const parts = command.map(escapePgrepPattern);
+    if (parts.length === 0) {
+        return '';
+    }
+    if (parts.length === 1) {
+        return parts[0];
+    }
+    return parts.join('.*');
+}
+
 function isProcessRunning(command: string[]): boolean {
     if (!command || command.length === 0) {
         return false;
     }
 
+    const pattern = buildPgrepPattern(command);
+    if (!pattern) {
+        return false;
+    }
+
     try {
         // Search for the command in running processes
-        const searchPattern = command[0];
-        const result = execSync(`pgrep -f "${searchPattern}" 2>/dev/null`, {
+        const result = execFileSync('pgrep', ['-f', pattern], {
             encoding: 'utf-8',
             timeout: 1000,
         });

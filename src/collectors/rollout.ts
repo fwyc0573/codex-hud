@@ -4,7 +4,7 @@
  */
 
 import * as fs from 'fs';
-import * as readline from 'readline';
+import { StringDecoder } from 'string_decoder';
 import type {
   RolloutLine,
   ResponseItemPayload,
@@ -73,7 +73,8 @@ function extractToolTarget(toolName: string, argsStr?: string): string | undefin
 export async function parseRolloutFile(
   rolloutPath: string,
   fromOffset: number = 0,
-  maxRecentCalls: number = 10
+  maxRecentCalls: number = 10,
+  activeCalls?: Map<string, ToolCall>
 ): Promise<{ result: RolloutParseResult; newOffset: number }> {
   const toolActivity: ToolActivity = {
     recentCalls: [],
@@ -90,7 +91,7 @@ export async function parseRolloutFile(
   let sandboxMode: string | null = null;
 
   // Track running tool calls by ID for duration calculation
-  const runningCalls = new Map<string, ToolCall>();
+  const runningCalls = activeCalls ?? new Map<string, ToolCall>();
 
   if (!fs.existsSync(rolloutPath)) {
     return {
@@ -105,26 +106,44 @@ export async function parseRolloutFile(
   // If fromOffset is beyond file size, file might have been truncated
   const startOffset = fromOffset > fileSize ? 0 : fromOffset;
 
+  let skipFirstLine = false;
+  if (startOffset > 0) {
+    try {
+      const fd = fs.openSync(rolloutPath, 'r');
+      try {
+        const buffer = Buffer.alloc(1);
+        const bytes = fs.readSync(fd, buffer, 0, 1, startOffset - 1);
+        if (bytes === 1 && buffer[0] !== 0x0a) {
+          skipFirstLine = true;
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      // Ignore offset boundary checks
+    }
+  }
+
   return new Promise((resolve) => {
     const fileStream = fs.createReadStream(rolloutPath, {
-      encoding: 'utf8',
       start: startOffset,
     });
 
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity,
-    });
+    const decoder = new StringDecoder('utf8');
+    let buffer = '';
+    let bytesRead = 0;
 
-    let bytesRead = startOffset;
+    const processLine = (line: string): void => {
+      if (skipFirstLine) {
+        skipFirstLine = false;
+        return;
+      }
 
-    rl.on('line', (line) => {
-      bytesRead += Buffer.byteLength(line, 'utf8') + 1; // +1 for newline
-
-      if (!line.trim()) return;
+      const cleanedLine = line.endsWith('\r') ? line.slice(0, -1) : line;
+      if (!cleanedLine.trim()) return;
 
       try {
-        const entry = JSON.parse(line) as RolloutLine;
+        const entry = JSON.parse(cleanedLine) as RolloutLine;
         const timestamp = new Date(entry.timestamp);
 
         // Process based on entry type
@@ -219,16 +238,35 @@ export async function parseRolloutFile(
       } catch {
         // Skip malformed lines
       }
+    };
+
+    fileStream.on('data', (chunk: Buffer | string) => {
+      const bufferChunk = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
+      bytesRead += bufferChunk.length;
+      buffer += decoder.write(bufferChunk);
+
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        processLine(line);
+        newlineIndex = buffer.indexOf('\n');
+      }
     });
 
-    rl.on('close', () => {
+    fileStream.on('end', () => {
+      const tail = buffer + decoder.end();
+      if (tail) {
+        processLine(tail);
+      }
+
       resolve({
         result: { session, toolActivity, planProgress, tokenUsage, rateLimits, approvalPolicy, sandboxMode },
-        newOffset: bytesRead,
+        newOffset: startOffset + bytesRead,
       });
     });
 
-    rl.on('error', () => {
+    fileStream.on('error', () => {
       resolve({
         result: { session, toolActivity, planProgress, tokenUsage, rateLimits, approvalPolicy, sandboxMode },
         newOffset: startOffset,
@@ -244,6 +282,7 @@ export class RolloutParser {
   private rolloutPath: string | null = null;
   private lastOffset: number = 0;
   private cachedResult: RolloutParseResult | null = null;
+  private runningCalls: Map<string, ToolCall> = new Map();
 
   constructor(private maxRecentCalls: number = 10) { }
 
@@ -255,6 +294,7 @@ export class RolloutParser {
       this.rolloutPath = path;
       this.lastOffset = 0;
       this.cachedResult = null;
+      this.runningCalls.clear();
     }
   }
 
@@ -266,10 +306,22 @@ export class RolloutParser {
       return null;
     }
 
+    try {
+      const stats = fs.statSync(this.rolloutPath);
+      if (this.lastOffset > stats.size) {
+        this.lastOffset = 0;
+        this.cachedResult = null;
+        this.runningCalls.clear();
+      }
+    } catch {
+      return this.cachedResult;
+    }
+
     const { result, newOffset } = await parseRolloutFile(
       this.rolloutPath,
       this.lastOffset,
-      this.maxRecentCalls
+      this.maxRecentCalls,
+      this.runningCalls
     );
 
     this.lastOffset = newOffset;
@@ -319,6 +371,19 @@ export class RolloutParser {
       }
     }
 
+    if (this.runningCalls.size > 0) {
+      const seen = new Set(result.toolActivity.recentCalls.map((call) => call.id));
+      for (const call of this.runningCalls.values()) {
+        if (!seen.has(call.id)) {
+          result.toolActivity.recentCalls.push(call);
+          seen.add(call.id);
+        }
+      }
+      if (result.toolActivity.recentCalls.length > this.maxRecentCalls) {
+        result.toolActivity.recentCalls = result.toolActivity.recentCalls.slice(-this.maxRecentCalls);
+      }
+    }
+
     this.cachedResult = result;
     return result;
   }
@@ -329,6 +394,7 @@ export class RolloutParser {
   async fullParse(): Promise<RolloutParseResult | null> {
     this.lastOffset = 0;
     this.cachedResult = null;
+    this.runningCalls.clear();
     return this.parse();
   }
 

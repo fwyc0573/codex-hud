@@ -1,15 +1,6 @@
-## Modification History
-
-| Date       | Summary of Changes                          |
-|------------|---------------------------------------------|
-| 2026-01-18 | Sync README with current HUD behavior and paths |
-
-<p align="center">
-  <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
-  <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
-</p>
-
 # Codex HUD
+
+![Codex HUD](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
 
 OpenAI Codex CLI 的实时状态栏 HUD。
 
@@ -19,6 +10,8 @@ OpenAI Codex CLI 的实时状态栏 HUD。
 
 ```bash
 # From the repository root
+git clone https://github.com/your-repo/codex-hud.git
+cd codex-hud
 ./install.sh
 
 # Now just type 'codex' - HUD appears automatically!

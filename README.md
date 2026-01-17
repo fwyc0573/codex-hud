@@ -84,6 +84,18 @@ The installer will:
 3. Add shell aliases (`codex`, `codex-resume`) to `~/.bashrc` and `~/.zshrc` (with backups)
 4. Prompt to install tmux if not present
 
+After installation, refresh your shell environment so the aliases take effect:
+
+```bash
+# Bash
+source ~/.bashrc
+
+# Zsh
+source ~/.zshrc
+```
+
+Alternatively, close and reopen your terminal.
+
 ### Manual Installation
 
 ```bash
@@ -115,6 +127,18 @@ This will:
 - Remove the codex-hud aliases from common shell rc files
 - Kill any running codex-hud sessions and HUD panes
 - Restore backed-up aliases if available
+
+After uninstalling, refresh your shell environment so the changes take effect:
+
+```bash
+# Bash
+source ~/.bashrc
+
+# Zsh
+source ~/.zshrc
+```
+
+Alternatively, close and reopen your terminal.
 
 ## Usage
 

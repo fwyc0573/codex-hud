@@ -19,6 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER_PATH="$SCRIPT_DIR/bin/codex-hud"
 BACKUP_FILE="$HOME/.codex-hud-backup-aliases"
 MARKER="# codex-hud alias"
+SOURCE_MARKER="# codex-hud: load bashrc"
 
 # Print functions
 error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
@@ -268,6 +269,26 @@ add_alias() {
     info "Added alias to $rc_file"
 }
 
+# Ensure bash login shells load ~/.bashrc
+ensure_bashrc_sourced() {
+    local bash_profile="$HOME/.bash_profile"
+    local bashrc="$HOME/.bashrc"
+
+    if [[ ! -f "$bash_profile" ]]; then
+        touch "$bash_profile"
+    fi
+
+    if grep -q "$SOURCE_MARKER" "$bash_profile" 2>/dev/null; then
+        return 0
+    fi
+
+    echo "" >> "$bash_profile"
+    echo "$SOURCE_MARKER" >> "$bash_profile"
+    echo "if [ -f \"$bashrc\" ]; then" >> "$bash_profile"
+    echo "  . \"$bashrc\"" >> "$bash_profile"
+    echo "fi" >> "$bash_profile"
+}
+
 # Build the project
 build_project() {
     step "Installing Node.js dependencies..."
@@ -305,11 +326,20 @@ main() {
     step "Detected shell: $shell_name"
     
     local bash_rc="$HOME/.bashrc"
+    local bash_profile="$HOME/.bash_profile"
     local zsh_rc
     zsh_rc=$(get_zsh_rc_file)
     
     step "Configuring aliases in $bash_rc..."
     add_alias "$bash_rc" "bash"
+
+    step "Ensuring bash login shells load $bash_rc..."
+    ensure_bashrc_sourced
+
+    if [[ -f "$bash_profile" ]]; then
+        step "Configuring aliases in $bash_profile..."
+        add_alias "$bash_profile" "bash"
+    fi
     
     step "Configuring aliases in $zsh_rc..."
     add_alias "$zsh_rc" "zsh"

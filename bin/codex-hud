@@ -17,6 +17,7 @@ HUD_DIR="$(dirname "$SCRIPT_DIR")"
 HUD_HEIGHT="${CODEX_HUD_HEIGHT:-3}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 SESSION_MODE="${CODEX_HUD_SESSION_MODE:-unique}"
+TMUX_MOUSE="${CODEX_HUD_TMUX_MOUSE:-on}"
 
 # Check for bypass mode - run original codex directly without HUD
 if [[ -n "${CODEX_HUD_BYPASS:-}" ]]; then
@@ -236,6 +237,14 @@ Install Node.js 18+ from: https://nodejs.org/"
     fi
 }
 
+# Enable tmux mouse mode to allow trackpad scrolling in copy mode.
+configure_tmux_mouse() {
+    local session_name="$1"
+    if [[ "$TMUX_MOUSE" == "on" ]]; then
+        tmux set-option -t "$session_name" mouse on
+    fi
+}
+
 # Build the HUD renderer if needed
 build_hud() {
     local dist_file="$HUD_DIR/dist/index.js"
@@ -323,6 +332,7 @@ create_session() {
     if [[ "$HUD_POSITION" == "top" ]]; then
         # Create session with HUD at top
         tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height" "$hud_cmd"
+        configure_tmux_mouse "$SESSION_NAME"
         # Split below for codex (main pane)
         tmux split-window -v -t "$SESSION_NAME" -l $((term_height - HUD_HEIGHT - 1))
         # Send codex command to the new pane (pane 1)
@@ -333,6 +343,7 @@ create_session() {
         # Default: HUD at bottom
         # Create session, start with shell
         tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+        configure_tmux_mouse "$SESSION_NAME"
         # Send codex command to main pane (pane 0)
         tmux send-keys -t "$SESSION_NAME:.0" "$wrapped_codex_cmd" C-m
         # Split below for HUD
@@ -463,6 +474,7 @@ Environment Variables:
   CODEX_HUD_HEIGHT       HUD pane height in lines (default: 3)
   CODEX_HUD_NO_ATTACH    If set, always create new session
   CODEX_HUD_SESSION_MODE Session mode: unique (default), shared
+  CODEX_HUD_TMUX_MOUSE   Enable tmux mouse mode for scrolling: on (default), off
   CODEX_HUD_BYPASS       If set, bypass HUD and run codex directly
 
 Requirements:

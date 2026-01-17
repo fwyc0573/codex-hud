@@ -147,6 +147,7 @@ codex-hud --help
 | `CODEX_HUD_HEIGHT` | HUD pane height in lines | `3` |
 | `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
 | `CODEX_HUD_SESSION_MODE` | Session mode: `unique`, `shared` | `unique` |
+| `CODEX_HUD_TMUX_MOUSE` | Enable tmux mouse mode (trackpad scroll/copy mode): `on`, `off` | `on` |
 | `CODEX_HUD_BYPASS` | If set, run original Codex without HUD | (unset) |
 
 Example:

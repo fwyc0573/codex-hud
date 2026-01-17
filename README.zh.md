@@ -131,6 +131,19 @@ source ~/.zshrc
 
 或者关闭并重新打开终端。
 
+
+## 支持系统
+
+- Linux
+- macOS (Apple Silicon)
+
+
+## 等待测试
+
+- Windows (testing pending)
+- macOS (Intel Silicon) (testing pending)
+
+
 ## 使用方法
 
 安装后，像往常一样使用 `codex`：

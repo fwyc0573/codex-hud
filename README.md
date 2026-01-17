@@ -131,6 +131,18 @@ source ~/.zshrc
 
 Alternatively, close and reopen your terminal.
 
+## System Support
+
+- Linux
+- macOS (Apple Silicon)
+
+## Pending Validation
+
+- Windows (testing pending)
+- macOS (Intel Silicon) (testing pending)
+
+
+
 ## Usage
 
 After installation, just use `codex` as you normally would:

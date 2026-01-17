@@ -8,7 +8,7 @@ Real-time statusline HUD for OpenAI Codex CLI.
 
 ```bash
 # Clone and install
-git clone https://github.com/your-repo/codex-hud.git
+git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 ./install.sh
 
@@ -39,6 +39,7 @@ Dir: ...ethanfeng/Documents/GitHub/codex-hud | Session: 019bc7f3...
 - **MCP Servers**: Count of configured MCP servers
 - **Approval Policy**: Current approval policy setting
 - **AGENTS.md Detection**: Count of AGENTS.md files in project
+- **Sandbox Mode**: Current sandbox mode (if configured)
 
 ### Phase 2 (Advanced) ✨ NEW
 - **Token Usage**: Real-time token consumption with progress bar
@@ -75,7 +76,7 @@ Dir: ...ethanfeng/Documents/GitHub/codex-hud | Session: 019bc7f3...
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/codex-hud.git
+git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 
 # Run the installer
@@ -87,6 +88,8 @@ The installer will:
 2. Build the TypeScript project
 3. Add a shell alias so `codex` → `codex-hud`
 4. Prompt to install tmux if not present
+
+See `RELEASE_NOTES_v0.5.0.md` for v0.5.0 release highlights.
 
 ### Manual Installation
 
@@ -128,6 +131,9 @@ codex-hud --kill
 
 # List all codex-hud sessions
 codex-hud --list
+
+# Kill all codex-hud sessions
+codex-hud --kill-all
 
 # Show help
 codex-hud --help
@@ -238,10 +244,16 @@ node dist/index.js
 
 1. **Token usage accuracy**: Depends on Codex session rollout format
 2. **Requires tmux**: The split-pane display needs tmux
-3. **Wrapper launch required**: Must use `codex-hud` instead of `codex` directly
-4. **Session detection delay**: Up to 5 seconds to detect new sessions
+3. **Session detection delay**: Up to 5 seconds to detect new sessions
 
 ## Changelog
+
+### v0.5.0 (Phase 3)
+- Added automatic tmux installation
+- Added shell alias integration for `codex`
+- Added unique/shared session modes and bypass option
+- Added sandbox mode display
+- Added one-command install/uninstall
 
 ### v0.2.0 (Phase 2)
 - Added token usage display with progress bar

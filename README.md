@@ -14,6 +14,8 @@ git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 ./install.sh
 
+# Close and reopen your terminal or use `source ~/.bashrc` or `source ~/.zshrc` to 
+# refresh your shell environment.
 # Now just type 'codex' - HUD appears automatically!
 ```
 

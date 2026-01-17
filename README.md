@@ -18,7 +18,9 @@ Real-time statusline HUD for OpenAI Codex CLI.
 ## Quick Start (One Command Install)
 
 ```bash
-# From the repository root
+# Clone and install
+git clone https://github.com/your-repo/codex-hud.git
+cd codex-hud
 ./install.sh
 
 # Now just type 'codex' - HUD appears automatically!

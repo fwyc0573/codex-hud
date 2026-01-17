@@ -14,7 +14,8 @@ git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 ./install.sh
 
-# Now just type 'codex' - HUD appears automatically!
+# 关闭并重新打开终端或使用 `source ~/.bashrc` 或 `source ~/.zshrc` 刷新 shell 环境。
+# 现在只需输入 'codex' - HUD 自动显示！
 ```
 
 就是这么简单！安装完成后，输入 `codex` 将自动启动并显示 HUD。

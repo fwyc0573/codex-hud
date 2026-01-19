@@ -145,6 +145,29 @@ function findRolloutsInDir(dirPath: string): SessionFile[] {
 }
 
 /**
+ * Find all rollout files within the last N days
+ */
+function findRolloutsInDays(maxDaysBack: number = DEFAULT_LOOKBACK_DAYS): SessionFile[] {
+  const sessionsDir = getSessionsDir();
+  const now = new Date();
+  const rollouts: SessionFile[] = [];
+
+  for (let daysAgo = 0; daysAgo <= maxDaysBack; daysAgo++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - daysAgo);
+
+    const year = date.getFullYear().toString();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+
+    const dayDir = path.join(sessionsDir, year, month, day);
+    rollouts.push(...findRolloutsInDir(dayDir));
+  }
+
+  return rollouts;
+}
+
+/**
  * Find the most recent rollout file
  * Searches backwards from today's date
  */
@@ -292,12 +315,15 @@ export class SessionFinder {
   private currentSession: SessionFile | null = null;
   private checkInterval: NodeJS.Timeout | null = null;
   private targetCwd: string | null = null;
+  private targetStartTime: Date | null = null;
 
   constructor(
     targetCwd?: string,
-    private onSessionChange?: (session: SessionFile | null) => void
+    private onSessionChange?: (session: SessionFile | null) => void,
+    targetStartTime?: Date | null
   ) {
     this.targetCwd = targetCwd || null;
+    this.targetStartTime = targetStartTime ?? null;
   }
 
   /**
@@ -322,28 +348,38 @@ export class SessionFinder {
    * Check for active or recent sessions
    */
   check(): SessionFile | null {
+    // If we already have a session, keep it unless the file disappears
+    if (this.currentSession) {
+      if (fs.existsSync(this.currentSession.path)) {
+        try {
+          const stats = fs.statSync(this.currentSession.path);
+          this.currentSession.modifiedAt = stats.mtime;
+          this.currentSession.size = stats.size;
+        } catch {
+          // ignore stat errors
+        }
+        return this.currentSession;
+      }
+
+      // Session file removed
+      this.currentSession = null;
+      this.onSessionChange?.(null);
+    }
+
     // First, look for actively modified sessions (within last 60s)
     const active = findActiveRollouts(60, this.targetCwd || undefined, DEFAULT_LOOKBACK_DAYS);
-    if (active.length > 0) {
-      const newest = active[0];
-      if (
-        !this.currentSession ||
-        this.currentSession.path !== newest.path ||
-        this.currentSession.modifiedAt.getTime() !== newest.modifiedAt.getTime()
-      ) {
-        this.currentSession = newest;
-        this.onSessionChange?.(newest);
-      }
-      return newest;
+    const activeMatch = this.selectBestSession(active);
+    if (activeMatch) {
+      this.currentSession = activeMatch;
+      this.onSessionChange?.(activeMatch);
+      return activeMatch;
     }
 
     // Fall back to most recent rollout
-    const recent = findMostRecentRollout(DEFAULT_LOOKBACK_DAYS, this.targetCwd || undefined);
+    const recent = this.findBestRecentSession();
     if (recent) {
-      if (!this.currentSession || this.currentSession.path !== recent.path) {
-        this.currentSession = recent;
-        this.onSessionChange?.(recent);
-      }
+      this.currentSession = recent;
+      this.onSessionChange?.(recent);
       return recent;
     }
 
@@ -361,5 +397,51 @@ export class SessionFinder {
    */
   getCurrentSession(): SessionFile | null {
     return this.currentSession;
+  }
+
+  private findBestRecentSession(): SessionFile | null {
+    if (!this.targetStartTime) {
+      return findMostRecentRollout(DEFAULT_LOOKBACK_DAYS, this.targetCwd || undefined);
+    }
+
+    let rollouts = findRolloutsInDays(DEFAULT_LOOKBACK_DAYS);
+    if (this.targetCwd) {
+      rollouts = rollouts.filter((r) => peekRolloutCwd(r.path) === this.targetCwd);
+    }
+
+    return this.selectBestSession(rollouts);
+  }
+
+  private selectBestSession(sessions: SessionFile[]): SessionFile | null {
+    if (sessions.length === 0) {
+      return null;
+    }
+
+    if (!this.targetStartTime) {
+      const sorted = sessions.sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+      return sorted[0] ?? null;
+    }
+
+    const targetMs = this.targetStartTime.getTime();
+    const toleranceMs = 10 * 60 * 1000; // 10 minutes
+
+    let candidates = sessions.filter(
+      (s) => Math.abs(s.timestamp.getTime() - targetMs) <= toleranceMs
+    );
+
+    if (candidates.length === 0) {
+      candidates = sessions;
+    }
+
+    candidates.sort((a, b) => {
+      const aDelta = Math.abs(a.timestamp.getTime() - targetMs);
+      const bDelta = Math.abs(b.timestamp.getTime() - targetMs);
+      if (aDelta !== bDelta) {
+        return aDelta - bDelta;
+      }
+      return b.modifiedAt.getTime() - a.modifiedAt.getTime();
+    });
+
+    return candidates[0] ?? null;
   }
 }

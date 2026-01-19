@@ -5,7 +5,7 @@
  */
 
 import type { HudData, GitStatus } from '../../types.js';
-import { theme, icons, colors } from '../colors.js';
+import { theme, icons, colors, visualLength, truncate } from '../colors.js';
 
 /**
  * Render git sync status (ahead/behind)
@@ -50,11 +50,21 @@ function renderGitFileStats(git: GitStatus): string {
  * Render the project line
  * Format: project-name git:(branch * ↑1)
  */
-export function renderProjectLine(data: HudData): string {
-  const parts: string[] = [];
+type ProjectLineOptions = {
+  includeFileStats?: boolean;
+  maxWidth?: number;
+};
+
+export function renderProjectLine(data: HudData, options: ProjectLineOptions = {}): string {
+  const includeFileStats = options.includeFileStats !== false;
+  const maxWidth = options.maxWidth;
   
   // Project name (yellow like claude-hud)
-  parts.push(theme.projectName(data.project.projectName));
+  const projectName = data.project.projectName;
+  const projectLabel = theme.projectName(projectName);
+  const parts: string[] = [projectLabel];
+  let gitDisplay = '';
+  let fileStats = '';
   
   // Git status (if in a git repo)
   if (data.git.isGitRepo && data.git.branch) {
@@ -73,15 +83,45 @@ export function renderProjectLine(data: HudData): string {
     }
     
     // Format as "git:(branch * ↑1)"
-    const gitDisplay = theme.gitPrefix('git:(') + theme.gitBranch(gitContent) + theme.gitPrefix(')');
+    gitDisplay = theme.gitPrefix('git:(') + theme.gitBranch(gitContent) + theme.gitPrefix(')');
     parts.push(gitDisplay);
     
     // Add file stats if any
-    const fileStats = renderGitFileStats(data.git);
-    if (fileStats) {
-      parts.push(fileStats);
+    if (includeFileStats) {
+      fileStats = renderGitFileStats(data.git);
+      if (fileStats) {
+        parts.push(fileStats);
+      }
     }
   }
   
-  return parts.join(' ');
+  let line = parts.join(' ');
+  if (maxWidth === undefined || visualLength(line) <= maxWidth) {
+    return line;
+  }
+
+  if (maxWidth <= 0) {
+    return gitDisplay || '';
+  }
+
+  // Retry without file stats if present.
+  if (fileStats) {
+    line = [projectLabel, gitDisplay].filter(Boolean).join(' ');
+    if (visualLength(line) <= maxWidth) {
+      return line;
+    }
+  }
+
+  if (gitDisplay) {
+    const gitSegment = ` ${gitDisplay}`;
+    const availableForProject = maxWidth - visualLength(gitSegment);
+    if (availableForProject <= 0) {
+      return gitDisplay;
+    }
+    const truncatedName = truncate(projectName, availableForProject);
+    return [theme.projectName(truncatedName), gitDisplay].join(' ');
+  }
+
+  const truncatedName = truncate(projectName, maxWidth);
+  return theme.projectName(truncatedName);
 }

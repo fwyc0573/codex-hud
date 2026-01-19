@@ -59,6 +59,7 @@ That's it! After installation, typing `codex` will automatically launch with the
 - **Per-Launch Sessions**: Each run creates a new tmux session and auto-cleans on exit
 - **Configurable HUD Position**: Top or bottom (environment variable)
 - **One-Command Install/Uninstall**: Simple setup and removal
+- **HUD Mode Toggle**: Switch between single-session details and multi-session overview
 
 ## Requirements
 
@@ -184,12 +185,16 @@ codex-hud --help
 codex-hud --self-check
 ```
 
+### Scrolling in Codex CLI Pane
+
+codex-hud enables tmux mouse mode for each session to make trackpad scrolling smoother and more controllable in the Codex CLI pane.
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CODEX_HUD_POSITION` | HUD pane position: `bottom`, `top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD pane height in lines | 25% of terminal height (min 3) |
+| `CODEX_HUD_HEIGHT` | HUD pane height in lines | 1/6 of terminal height (min 3) |
 | `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
 | `CODEX_HUD_CWD` | Override working directory used for HUD context/session matching | (unset; wrapper sets) |
 
@@ -220,7 +225,7 @@ The wrapper creates a tmux session with:
 ```
 [gpt-5.2-codex] █████░░░░ 45% │ my-project git:(main ●) │ ⏱️ 12m
 1 configs | mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
-🎫 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
 ◐ Edit: file.ts | ✓ Read ×3
 ```
@@ -256,6 +261,21 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
 - Plan progress lines when available
 
 When the HUD height is smaller than the number of available lines, extra lines are trimmed with a `…N more lines hidden` indicator.
+
+## HUD Modes
+
+Codex HUD supports two display modes:
+
+1. **Single Session Mode** (default)
+  - Shows detailed info for the current Codex session.
+2. **Multi Session Overview Mode**
+  - Shows only active sessions (tool calls or generation activity).
+  - Each line shows **Context usage** + **Session ID**.
+
+### Toggle Shortcut
+
+- **Prefix + H** (tmux) toggles between modes.
+- When focused on the HUD pane, you can also press **Ctrl+T**.
 
 ## Configuration
 

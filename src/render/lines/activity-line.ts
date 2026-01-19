@@ -191,7 +191,7 @@ export function renderTokenLine(data: HudData): string | null {
     const cachedInput = usage.cached_input_tokens ?? 0;
     const nonCachedInput = Math.max(0, (usage.input_tokens ?? 0) - cachedInput);
 
-    parts.push(theme.tokenCount(`${icons.tokens} Tokens: ${formatTokenCount(usage.total_tokens ?? 0)}`));
+    parts.push(theme.tokenCount(`Tokens: ${formatTokenCount(usage.total_tokens ?? 0)}`));
 
     const breakdown: string[] = [];
     if (nonCachedInput > 0) {

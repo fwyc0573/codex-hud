@@ -85,6 +85,22 @@ export interface ContextUsage {
 }
 
 // ============================================================================
+// Display Mode (Single vs Overview)
+// ============================================================================
+
+export type HudDisplayMode = 'single' | 'overview';
+
+export interface SessionOverviewItem {
+  id: string;
+  contextUsage?: ContextUsage;
+}
+
+export interface SessionOverview {
+  sessions: SessionOverviewItem[];
+  updatedAt: Date;
+}
+
+// ============================================================================
 // Layout Configuration
 // ============================================================================
 
@@ -307,6 +323,10 @@ export interface HudData {
   toolActivity?: ToolActivity;
   agentActivity?: AgentActivity;
   planProgress?: PlanProgress;
+
+  // Display mode and overview data
+  displayMode?: HudDisplayMode;
+  overview?: SessionOverview;
 }
 
 // ============================================================================

@@ -81,7 +81,7 @@ export function renderIdentityLine(data: HudData, layout: LayoutConfig): string 
       parts.push(`${bar} ${percentStr}`);
     } else {
       // Just show token count without bar
-      parts.push(colors.dim(`${icons.tokens} ${formatTokenCount(total)}`));
+      parts.push(colors.dim(`Tokens: ${formatTokenCount(total)}`));
     }
   }
   

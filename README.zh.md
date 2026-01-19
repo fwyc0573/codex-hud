@@ -53,18 +53,26 @@ cd codex-hud
   - 优先选择最近修改的会话
 
 ### 第三阶段（无缝集成）✨ 新增
-- **自动安装 tmux**: 如果未安装则自动安装 tmux
-- **Shell 别名集成**: `codex` 和 `codex-resume` 自动启动 HUD
-- **每次启动新 session**: 退出时自动清理 tmux session
-- **可配置 HUD 位置**: 顶部或底部（通过环境变量）
-- **一键安装/卸载**: 简单的设置和移除
+- **HUD 模式切换**: 单 Session 详情 / 多 Session 概览
 
 ## 系统要求
-
-- **Node.js** 18+
-- **OpenAI Codex CLI** 已安装并在 PATH 中
 - **tmux**（如果缺失会自动安装）
 - **Codex home** 位于 `CODEX_HOME`、`~/.codex` 或 `~/.codex_home`（需存在 `sessions/` 目录或配置 `CODEX_SESSIONS_PATH`）
+
+## HUD 模式
+
+Codex HUD 支持两种显示模式：
+
+1. **单 Session 模式**（默认）
+  - 显示当前终端对应的 Session 详细信息。
+2. **多 Session 概览模式**
+  - 仅显示正在执行任务的 Session（工具调用或生成活动）。
+  - 每行显示 **Context 使用率** + **Session ID**。
+
+### 快捷键切换
+
+- **Prefix + H**（tmux）在两种模式间切换。
+- 当焦点在 HUD 面板时，也可使用 **Ctrl+T**。
 
 ## 安装
 
@@ -184,12 +192,16 @@ codex-hud --help
 codex-hud --self-check
 ```
 
+### Codex CLI 面板滚动体验
+
+codex-hud 会为每个 tmux 会话启用鼠标模式，以让触控板滚动在 Codex CLI 面板中更平滑、可控。
+
 ### 环境变量
 
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
 | `CODEX_HUD_POSITION` | HUD 面板位置：`bottom`、`top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | 终端高度的 25%（最小 3） |
+| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | 终端高度的 1/6（最小 3） |
 | `CODEX_HUD_NO_ATTACH` | 如果设置，总是创建新会话 | （未设置） |
 | `CODEX_HUD_CWD` | 覆盖 HUD 使用的工作目录（用于上下文/会话匹配） | （未设置；由 wrapper 设置） |
 
@@ -220,7 +232,7 @@ Note: HUD height is clamped to the available terminal size.
 ```
 [gpt-5.2-codex] █████░░░░ 45% │ my-project git:(main ●) │ ⏱️ 12m
 1 configs | mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
-🎫 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
 ◐ Edit: file.ts | ✓ Read ×3
 ```

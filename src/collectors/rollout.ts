@@ -28,6 +28,10 @@ export interface RolloutParseResult {
   // Compact event tracking
   compactCount: number;
   lastCompactTime: Date | null;
+  // Activity timestamps
+  lastToolActivityTime: Date | null;
+  lastAssistantMessageTime: Date | null;
+  lastEventTime: Date | null;
 }
 
 /**
@@ -84,13 +88,26 @@ export async function parseRolloutFile(
   let tokenUsage: TokenUsageInfo | null = null;
   let compactCount = 0;
   let lastCompactTime: Date | null = null;
+  let lastToolActivityTime: Date | null = null;
+  let lastAssistantMessageTime: Date | null = null;
+  let lastEventTime: Date | null = null;
 
   // Track running tool calls by ID for duration calculation
   const runningCalls = new Map<string, ToolCall>();
 
   if (!fs.existsSync(rolloutPath)) {
     return {
-      result: { session, toolActivity, planProgress, tokenUsage, compactCount, lastCompactTime },
+      result: {
+        session,
+        toolActivity,
+        planProgress,
+        tokenUsage,
+        compactCount,
+        lastCompactTime,
+        lastToolActivityTime,
+        lastAssistantMessageTime,
+        lastEventTime,
+      },
       newOffset: 0,
     };
   }
@@ -124,6 +141,7 @@ export async function parseRolloutFile(
         const timestamp = new Date(entry.timestamp);
 
         // Process based on entry type
+        lastEventTime = timestamp;
         if (entry.type === 'session_meta') {
           const meta = entry.payload as SessionMetaPayload;
           session = {
@@ -145,6 +163,7 @@ export async function parseRolloutFile(
 
           if (payload.type === 'function_call' && payload.name) {
             // New tool call started
+            lastToolActivityTime = timestamp;
             const toolCall: ToolCall = {
               id: payload.id ?? payload.call_id ?? `call_${Date.now()}`,
               name: payload.name,
@@ -165,6 +184,7 @@ export async function parseRolloutFile(
             }
           } else if (payload.type === 'function_call_output' && payload.call_id) {
             // Tool call completed
+            lastToolActivityTime = timestamp;
             const runningCall = runningCalls.get(payload.call_id);
             if (runningCall) {
               runningCall.status =
@@ -180,6 +200,8 @@ export async function parseRolloutFile(
                 toolActivity.recentCalls[idx] = runningCall;
               }
             }
+          } else if (payload.type === 'message' && payload.role === 'assistant') {
+            lastAssistantMessageTime = timestamp;
           }
         } else if (entry.type === 'event_msg') {
           const payload = entry.payload as EventMsgPayload;
@@ -219,14 +241,34 @@ export async function parseRolloutFile(
 
     rl.on('close', () => {
       resolve({
-        result: { session, toolActivity, planProgress, tokenUsage, compactCount, lastCompactTime },
+        result: {
+          session,
+          toolActivity,
+          planProgress,
+          tokenUsage,
+          compactCount,
+          lastCompactTime,
+          lastToolActivityTime,
+          lastAssistantMessageTime,
+          lastEventTime,
+        },
         newOffset: bytesRead,
       });
     });
 
     rl.on('error', () => {
       resolve({
-        result: { session, toolActivity, planProgress, tokenUsage, compactCount, lastCompactTime },
+        result: {
+          session,
+          toolActivity,
+          planProgress,
+          tokenUsage,
+          compactCount,
+          lastCompactTime,
+          lastToolActivityTime,
+          lastAssistantMessageTime,
+          lastEventTime,
+        },
         newOffset: startOffset,
       });
     });

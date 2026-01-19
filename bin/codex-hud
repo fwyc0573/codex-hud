@@ -5,7 +5,7 @@
 #
 # Environment variables:
 #   CODEX_HUD_POSITION - HUD pane position: bottom (default), top
-#   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 25% of terminal height, min 3)
+#   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 1/6 of terminal height, min 3)
 #   CODEX_HUD_NO_ATTACH - If set, don't attach to existing session
 #
 
@@ -284,7 +284,7 @@ resolve_hud_height() {
         return 0
     fi
     
-    local desired=$((term_height / 4))
+    local desired=$((term_height / 6))
     if [[ "$desired" -lt "$min_height" ]]; then
         desired="$min_height"
     fi
@@ -322,6 +322,13 @@ create_session() {
     
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    # Optimize tmux mouse + scroll behavior for smoother trackpad scrolling
+    tmux set-option -t "$SESSION_NAME" -g mouse on
+    tmux set-option -t "$SESSION_NAME" -g escape-time 0
+    tmux set-option -t "$SESSION_NAME" -g assume-paste-time 0
+    tmux set-option -t "$SESSION_NAME" -g repeat-time 0
+    tmux set-option -t "$SESSION_NAME" -g history-limit 200000
+    tmux set-option -t "$SESSION_NAME" -g wheel-scroll-lines 1 2>/dev/null || true
     local main_pane_id
     main_pane_id=$(get_primary_pane_id)
     if [[ -z "$main_pane_id" ]]; then
@@ -335,17 +342,28 @@ create_session() {
     sleep 0.2
     
     # Split the window based on HUD_POSITION
-    local hud_cmd="cd '$cwd' && LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD='$cwd' node '$HUD_DIR/dist/index.js'"
+    local session_start
+    session_start=$(date +%s)
+    local hud_cmd="cd '$cwd' && LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD='$cwd' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' node '$HUD_DIR/dist/index.js'"
     
     if [[ "$HUD_POSITION" == "top" ]]; then
         # Split at top, then swap panes
-        tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b "$hud_cmd"
+        local hud_pane_id
+        hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$hud_cmd")
         tmux select-pane -t "$main_pane_id"
     else
         # Default: bottom
-        tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" "$hud_cmd"
+        local hud_pane_id
+        hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$hud_cmd")
         tmux select-pane -t "$main_pane_id"
     fi
+
+    if [[ -n "${hud_pane_id:-}" ]]; then
+        tmux set-option -t "$SESSION_NAME" -q @codex_hud_pane "$hud_pane_id"
+    fi
+
+    # Bind toggle key (Prefix + H) to switch HUD modes for this session
+    tmux bind-key -T prefix H run-shell "tmux if-shell -F '#{@codex_hud_pane}' 'tmux send-keys -t #{@codex_hud_pane} C-t' ''"
     
     SESSION_CREATED="true"
 }
@@ -413,7 +431,7 @@ Options:
 
 Environment Variables:
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
-  CODEX_HUD_HEIGHT    HUD pane height in lines (default: 25% of terminal height, min 3)
+  CODEX_HUD_HEIGHT    HUD pane height in lines (default: 1/6 of terminal height, min 3)
   CODEX_HUD_NO_ATTACH If set, always create new session
 
 Requirements:

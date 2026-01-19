@@ -6,12 +6,20 @@
 import { readCodexConfig } from './collectors/codex-config.js';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
-import { SessionFinder } from './collectors/session-finder.js';
-import { RolloutParser } from './collectors/rollout.js';
+import { SessionFinder, findActiveRollouts } from './collectors/session-finder.js';
+import { RolloutParser, parseRolloutFile } from './collectors/rollout.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
 import { BASELINE_TOKENS } from './types.js';
-import type { HudData, TokenUsage } from './types.js';
+import type {
+  HudData,
+  TokenUsage,
+  ContextUsage,
+  HudDisplayMode,
+  SessionOverview,
+  SessionOverviewItem,
+  TokenUsageInfo,
+} from './types.js';
 
 // Session start time
 const SESSION_START = new Date();
@@ -22,8 +30,23 @@ const REFRESH_INTERVAL = 1000;
 // Current working directory for the HUD
 const HUD_CWD = process.env.CODEX_HUD_CWD || process.cwd();
 
+// Optional HUD session start time (for session isolation)
+const HUD_SESSION_START = (() => {
+  const raw = process.env.CODEX_HUD_SESSION_START;
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed > 1_000_000_000_000 ? new Date(parsed) : new Date(parsed * 1000);
+})();
+
 // Track if we're running
 let isRunning = true;
+
+// Display mode (single vs overview)
+let displayMode: HudDisplayMode =
+  process.env.CODEX_HUD_MODE === 'overview' ? 'overview' : 'single';
+
+const TOGGLE_KEYS = ['\u0014', 't', 'T']; // Ctrl+T or t/T
 
 function getNonCachedInputTokens(usage: TokenUsage | undefined): number {
   if (!usage) {
@@ -47,6 +70,38 @@ function percentOfContextWindowRemaining(tokensInContext: number, contextWindow:
   return Math.round(Math.max(0, Math.min(100, percent)));
 }
 
+function buildContextUsage(
+  tokenUsage: TokenUsageInfo | undefined,
+  compactCount: number | undefined,
+  lastCompactTime: Date | null | undefined
+): ContextUsage | undefined {
+  if (!tokenUsage) {
+    return undefined;
+  }
+
+  const contextWindow = tokenUsage.model_context_window ?? 0;
+  const lastUsage = tokenUsage.last_token_usage;
+
+  if (contextWindow > 0 && lastUsage) {
+    const tokensInContext = lastUsage.total_tokens ?? 0;
+    const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
+    const percentUsed = 100 - percentRemaining;
+
+    return {
+      used: tokensInContext,
+      total: contextWindow,
+      percent: percentUsed,
+      inputTokens: getNonCachedInputTokens(lastUsage),
+      outputTokens: lastUsage.output_tokens ?? 0,
+      cachedTokens: lastUsage.cached_input_tokens ?? 0,
+      compactCount: compactCount ?? 0,
+      lastCompactTime: lastCompactTime ?? undefined,
+    };
+  }
+
+  return undefined;
+}
+
 // Phase 2: Session and rollout tracking
 const sessionFinder = new SessionFinder(HUD_CWD, (session) => {
   // When session changes, update rollout path
@@ -54,7 +109,7 @@ const sessionFinder = new SessionFinder(HUD_CWD, (session) => {
     rolloutParser.setRolloutPath(session.path);
     hudFileWatcher.setRolloutPath(session.path);
   }
-});
+}, HUD_SESSION_START);
 
 const rolloutParser = new RolloutParser(10);
 const hudFileWatcher = new HudFileWatcher();
@@ -78,11 +133,60 @@ function collectSyncData(): Omit<HudData, 'toolActivity' | 'planProgress' | 'tok
   };
 }
 
+async function collectOverviewData(): Promise<SessionOverview> {
+  const activeSessions = findActiveRollouts(60, undefined, 7);
+  const now = Date.now();
+  const activityWindowMs = 60 * 1000;
+  const sessions: SessionOverviewItem[] = [];
+
+  for (const sessionFile of activeSessions) {
+    const { result } = await parseRolloutFile(sessionFile.path, 0, 3);
+
+    const hasRecentTool =
+      result.lastToolActivityTime &&
+      now - result.lastToolActivityTime.getTime() <= activityWindowMs;
+    const hasRecentAssistant =
+      result.lastAssistantMessageTime &&
+      now - result.lastAssistantMessageTime.getTime() <= activityWindowMs;
+
+    if (!hasRecentTool && !hasRecentAssistant) {
+      continue;
+    }
+
+    const contextUsage = buildContextUsage(
+      result.tokenUsage ?? undefined,
+      result.compactCount,
+      result.lastCompactTime
+    );
+
+    sessions.push({
+      id: result.session?.id ?? sessionFile.sessionId,
+      contextUsage,
+    });
+  }
+
+  return {
+    sessions,
+    updatedAt: new Date(),
+  };
+}
+
 /**
  * Collect all HUD data including async rollout parsing
  */
 async function collectData(): Promise<HudData> {
   const syncData = collectSyncData();
+
+  if (displayMode === 'overview') {
+    const overview = await collectOverviewData();
+    const hudData: HudData = {
+      ...syncData,
+      displayMode,
+      overview,
+    };
+    cachedHudData = hudData;
+    return hudData;
+  }
 
   // Check for active session
   const session = sessionFinder.check();
@@ -96,29 +200,11 @@ async function collectData(): Promise<HudData> {
 
   // Build context usage from token usage if available
   // Matches codex "context window left" calculation based on last_token_usage.
-  let contextUsage = undefined;
-  if (rolloutData?.tokenUsage) {
-    const tokenInfo = rolloutData.tokenUsage;
-    const contextWindow = tokenInfo.model_context_window ?? 0;
-    const lastUsage = tokenInfo.last_token_usage;
-
-    if (contextWindow > 0 && lastUsage) {
-      const tokensInContext = lastUsage.total_tokens ?? 0;
-      const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
-      const percentUsed = 100 - percentRemaining;
-
-      contextUsage = {
-        used: tokensInContext,
-        total: contextWindow,
-        percent: percentUsed,
-        inputTokens: getNonCachedInputTokens(lastUsage),
-        outputTokens: lastUsage.output_tokens ?? 0,
-        cachedTokens: lastUsage.cached_input_tokens ?? 0,
-        compactCount: rolloutData.compactCount ?? 0,
-        lastCompactTime: rolloutData.lastCompactTime ?? undefined,
-      };
-    }
-  }
+  const contextUsage = buildContextUsage(
+    rolloutData?.tokenUsage ?? undefined,
+    rolloutData?.compactCount,
+    rolloutData?.lastCompactTime
+  );
 
   const hudData: HudData = {
     ...syncData,
@@ -127,6 +213,7 @@ async function collectData(): Promise<HudData> {
     planProgress: rolloutData?.planProgress ?? undefined,
     tokenUsage: rolloutData?.tokenUsage ?? undefined,
     contextUsage,
+    displayMode,
   };
 
   cachedHudData = hudData;
@@ -168,6 +255,20 @@ function shutdown(): void {
   process.exit(0);
 }
 
+function setupKeyListener(): void {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    return;
+  }
+
+  process.stdin.setRawMode(true);
+  process.stdin.on('data', (data: Buffer) => {
+    const input = data.toString('utf8');
+    if (TOGGLE_KEYS.some((key) => input.includes(key))) {
+      displayMode = displayMode === 'single' ? 'overview' : 'single';
+    }
+  });
+}
+
 /**
  * Main entry point
  */
@@ -180,6 +281,7 @@ async function main(): Promise<void> {
   // Handle stdin close (tmux pane closed)
   process.stdin.on('close', shutdown);
   process.stdin.resume();
+  setupKeyListener();
 
   // Set up file watchers
   hudFileWatcher.onConfigChange(() => {

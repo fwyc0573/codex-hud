@@ -34,6 +34,13 @@ export interface RolloutParseResult {
   lastEventTime: Date | null;
 }
 
+export interface RolloutParseOutput {
+  result: RolloutParseResult;
+  newOffset: number;
+  runningCalls: Map<string, ToolCall>;
+  wasTruncated: boolean;
+}
+
 /**
  * Extract target/path from tool arguments for display
  */
@@ -74,8 +81,9 @@ function extractToolTarget(toolName: string, argsStr?: string): string | undefin
 export async function parseRolloutFile(
   rolloutPath: string,
   fromOffset: number = 0,
-  maxRecentCalls: number = 10
-): Promise<{ result: RolloutParseResult; newOffset: number }> {
+  maxRecentCalls: number = 10,
+  runningCalls: Map<string, ToolCall> = new Map()
+): Promise<RolloutParseOutput> {
   const toolActivity: ToolActivity = {
     recentCalls: [],
     totalCalls: 0,
@@ -92,10 +100,8 @@ export async function parseRolloutFile(
   let lastAssistantMessageTime: Date | null = null;
   let lastEventTime: Date | null = null;
 
-  // Track running tool calls by ID for duration calculation
-  const runningCalls = new Map<string, ToolCall>();
-
   if (!fs.existsSync(rolloutPath)) {
+    runningCalls.clear();
     return {
       result: {
         session,
@@ -109,6 +115,8 @@ export async function parseRolloutFile(
         lastEventTime,
       },
       newOffset: 0,
+      runningCalls,
+      wasTruncated: false,
     };
   }
 
@@ -116,7 +124,11 @@ export async function parseRolloutFile(
   const fileSize = stats.size;
 
   // If fromOffset is beyond file size, file might have been truncated
-  const startOffset = fromOffset > fileSize ? 0 : fromOffset;
+  const wasTruncated = fromOffset > fileSize;
+  const startOffset = wasTruncated ? 0 : fromOffset;
+  if (wasTruncated) {
+    runningCalls.clear();
+  }
 
   return new Promise((resolve) => {
     const fileStream = fs.createReadStream(rolloutPath, {
@@ -198,6 +210,11 @@ export async function parseRolloutFile(
               );
               if (idx >= 0) {
                 toolActivity.recentCalls[idx] = runningCall;
+              } else {
+                toolActivity.recentCalls.push(runningCall);
+                if (toolActivity.recentCalls.length > maxRecentCalls) {
+                  toolActivity.recentCalls.shift();
+                }
               }
             }
           } else if (payload.type === 'message' && payload.role === 'assistant') {
@@ -253,6 +270,8 @@ export async function parseRolloutFile(
           lastEventTime,
         },
         newOffset: bytesRead,
+        runningCalls,
+        wasTruncated,
       });
     });
 
@@ -270,6 +289,8 @@ export async function parseRolloutFile(
           lastEventTime,
         },
         newOffset: startOffset,
+        runningCalls,
+        wasTruncated,
       });
     });
   });
@@ -282,6 +303,7 @@ export class RolloutParser {
   private rolloutPath: string | null = null;
   private lastOffset: number = 0;
   private cachedResult: RolloutParseResult | null = null;
+  private runningCalls: Map<string, ToolCall> = new Map();
 
   constructor(private maxRecentCalls: number = 10) {}
 
@@ -304,13 +326,19 @@ export class RolloutParser {
       return null;
     }
 
-    const { result, newOffset } = await parseRolloutFile(
+    const { result, newOffset, runningCalls, wasTruncated } = await parseRolloutFile(
       this.rolloutPath,
       this.lastOffset,
-      this.maxRecentCalls
+      this.maxRecentCalls,
+      this.runningCalls
     );
 
     this.lastOffset = newOffset;
+    this.runningCalls = runningCalls;
+
+    if (wasTruncated) {
+      this.cachedResult = null;
+    }
 
     // Merge with cached result for session info and accumulated stats
     if (this.cachedResult) {
@@ -331,7 +359,17 @@ export class RolloutParser {
         ...this.cachedResult.toolActivity.recentCalls,
         ...result.toolActivity.recentCalls,
       ];
-      result.toolActivity.recentCalls = allCalls.slice(-this.maxRecentCalls);
+      const deduped: ToolCall[] = [];
+      const seen = new Set<string>();
+      for (let i = allCalls.length - 1; i >= 0; i--) {
+        const call = allCalls[i];
+        if (seen.has(call.id)) {
+          continue;
+        }
+        seen.add(call.id);
+        deduped.unshift(call);
+      }
+      result.toolActivity.recentCalls = deduped.slice(-this.maxRecentCalls);
 
       // Merge compact tracking
       result.compactCount += this.cachedResult.compactCount;

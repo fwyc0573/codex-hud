@@ -19,10 +19,6 @@ HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 ALIAS_MARKER="# codex-hud alias"
 CODEX_CLI_PATH=""
 
-# Generate session name based on PWD hash (unique per invocation)
-SESSION_PREFIX="codex-hud-$(echo "$PWD" | md5sum 2>/dev/null | cut -c1-8 || echo "$$")"
-SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -55,6 +51,28 @@ step() {
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
+
+hash_cwd() {
+    local cwd="$1"
+    local hash=""
+    if command_exists md5sum; then
+        hash=$(printf "%s" "$cwd" | md5sum | awk '{print $1}')
+    elif command_exists md5; then
+        hash=$(printf "%s" "$cwd" | md5 | awk '{print $1}')
+    elif command_exists shasum; then
+        hash=$(printf "%s" "$cwd" | shasum -a 256 | awk '{print $1}')
+    fi
+    if [[ -n "$hash" ]]; then
+        echo "${hash:0:8}"
+    else
+        echo "$$"
+    fi
+}
+
+# Generate session name based on PWD hash (unique per invocation)
+SESSION_HASH="$(hash_cwd "$PWD")"
+SESSION_PREFIX="codex-hud-${SESSION_HASH}"
+SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
 
 resolve_codex_cli() {
     local path
@@ -236,13 +254,48 @@ get_primary_pane_id() {
     tmux list-panes -t "$SESSION_NAME" -F "#{pane_id}" 2>/dev/null | head -n1
 }
 
+# Find the most recent existing session for this directory
+find_existing_session() {
+    tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}-" | sort | tail -n1
+}
+
+set_fixed_hud_height() {
+    local session_name="$1"
+    local hud_pane_id="$2"
+    local height="$3"
+    local resize_helper="$SCRIPT_DIR/codex-hud-resize"
+
+    if [[ -z "$session_name" || -z "$hud_pane_id" || -z "$height" ]]; then
+        return 0
+    fi
+
+    tmux set-option -t "$session_name" -q @codex_hud_pane "$hud_pane_id"
+    tmux set-option -t "$session_name" -q @codex_hud_height "$height"
+
+    if [[ -x "$resize_helper" ]]; then
+        "$resize_helper" "$session_name"
+    else
+        tmux resize-pane -t "$hud_pane_id" -y "$height" 2>/dev/null || true
+    fi
+
+    local hook_cmd
+    if [[ -x "$resize_helper" ]]; then
+        hook_cmd="run-shell \"$resize_helper #{session_name}\""
+        tmux set-hook -t "$session_name" client-resized "$hook_cmd"
+        tmux set-hook -t "$session_name" after-resize-pane "$hook_cmd"
+    fi
+}
+
 # Check if session already exists and is usable
 check_existing_session() {
     if [[ -n "${CODEX_HUD_NO_ATTACH:-}" ]]; then
         return 1
     fi
     
-    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    local existing
+    existing=$(find_existing_session)
+    if [[ -n "$existing" ]]; then
+        SESSION_NAME="$existing"
         return 0
     fi
     return 1
@@ -312,13 +365,9 @@ create_session() {
     
     # Build the codex command string
     local codex_cmd="$CODEX_CLI_PATH"
-    if [[ ${#codex_args[@]} -gt 0 ]]; then
-        # Properly quote arguments
-        codex_cmd="$CODEX_CLI_PATH"
-        for arg in "${codex_args[@]}"; do
-            codex_cmd="$codex_cmd '$arg'"
-        done
-    fi
+    for arg in "${codex_args[@]}"; do
+        codex_cmd="$codex_cmd $(printf "%q" "$arg")"
+    done
     
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
@@ -359,7 +408,7 @@ create_session() {
     fi
 
     if [[ -n "${hud_pane_id:-}" ]]; then
-        tmux set-option -t "$SESSION_NAME" -q @codex_hud_pane "$hud_pane_id"
+        set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT"
     fi
 
     # Bind toggle key (Prefix + H) to switch HUD modes for this session
@@ -390,6 +439,11 @@ main() {
         main_pane_id=$(get_primary_pane_id)
         if [[ -n "$main_pane_id" ]]; then
             tmux select-pane -t "$main_pane_id" 2>/dev/null || true
+        fi
+        local hud_pane_id
+        hud_pane_id=$(tmux show-option -t "$SESSION_NAME" -qv @codex_hud_pane)
+        if [[ -n "$hud_pane_id" ]]; then
+            set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT"
         fi
         tmux attach-session -t "$SESSION_NAME"
         return 0

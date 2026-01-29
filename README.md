@@ -5,7 +5,7 @@
 
 # Codex HUD
 
-![Codex HUD](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
+![Codex HUD](./doc/fig/preview.png)
 
 Real-time statusline HUD for OpenAI Codex CLI.
 

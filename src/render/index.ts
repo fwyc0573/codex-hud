@@ -6,12 +6,13 @@
 import type { HudData, RenderOptions, LayoutConfig, LayoutMode } from '../types.js';
 import { DEFAULT_LAYOUT } from '../types.js';
 import { renderHud } from './header.js';
-import { colors, padEnd, visualLength } from './colors.js';
+import { colors, padEnd, visualLength, truncateAnsi } from './colors.js';
 
 // ANSI escape codes for cursor/screen control
 const CURSOR_HOME = '\x1b[H';
 const CLEAR_SCREEN = '\x1b[2J';
 const CLEAR_LINE = '\x1b[2K';
+const CLEAR_SCROLLBACK = '\x1b[3J';
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
 
@@ -94,6 +95,13 @@ function limitLines(lines: string[], maxLines: number): string[] {
   return limited;
 }
 
+function truncateLines(lines: string[], width: number): string[] {
+  if (width <= 0) {
+    return [];
+  }
+  return lines.map((line) => truncateAnsi(line, width));
+}
+
 /**
  * Create default layout config based on terminal size
  */
@@ -132,7 +140,10 @@ export function render(data: HudData): void {
   };
   
   const maxLines = Math.max(1, height);
-  const lines = applyStatusHint(limitLines(renderHud(data, options), maxLines), width);
+  const lines = truncateLines(
+    applyStatusHint(limitLines(renderHud(data, options), maxLines), width),
+    width
+  );
   
   // Move cursor to home position and render
   process.stdout.write(CURSOR_HOME);
@@ -192,7 +203,7 @@ export function renderSingleLine(data: HudData): string {
   };
   
   const lines = renderHud(data, options);
-  return lines[0] || '';
+  return truncateAnsi(lines[0] || '', width);
 }
 
 /**
@@ -203,6 +214,7 @@ export function renderToStdout(data: HudData): void {
   const width = getTerminalWidth();
   const height = getTerminalHeight();
   const layout = createDefaultLayout(width, height);
+  const clearScrollback = process.env.CODEX_HUD_CLEAR_SCROLLBACK === '1';
   
   const options: RenderOptions = {
     width,
@@ -211,7 +223,10 @@ export function renderToStdout(data: HudData): void {
   };
   
   const maxLines = Math.max(1, height);
-  const lines = applyStatusHint(limitLines(renderHud(data, options), maxLines), width);
+  const lines = truncateLines(
+    applyStatusHint(limitLines(renderHud(data, options), maxLines), width),
+    width
+  );
 
   const frame = `${width}x${height}\n${lines.join('\n')}`;
   if (frame === lastStdoutFrame) {
@@ -222,7 +237,8 @@ export function renderToStdout(data: HudData): void {
   lastStdoutFrame = frame;
 
   // Clear once on first render so the top line reliably appears in new panes.
-  process.stdout.write((isFirstRender ? CLEAR_SCREEN : '') + CURSOR_HOME);
+  const clearPrefix = (clearScrollback ? CLEAR_SCROLLBACK : '') + (isFirstRender ? CLEAR_SCREEN : '') + CURSOR_HOME;
+  process.stdout.write(clearPrefix);
 
   const totalLines = Math.max(lines.length, maxLines);
   for (let i = 0; i < totalLines; i++) {

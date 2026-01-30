@@ -8,7 +8,8 @@ import * as fs from 'fs';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
 import { SessionFinder, findActiveRollouts } from './collectors/session-finder.js';
-import { RolloutParser, parseRolloutFile, type RolloutParseResult } from './collectors/rollout.js';
+import { RolloutParser, parseRolloutFile } from './collectors/rollout.js';
+import { createParseQueue } from './utils/parse-queue.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
 import { BASELINE_TOKENS } from './types.js';
@@ -135,30 +136,7 @@ const hudFileWatcher = new HudFileWatcher();
 // Cached data that gets updated by watchers
 let cachedHudData: HudData | null = null;
 let configNeedsRefresh = false;
-let parseInFlight: Promise<RolloutParseResult | null> | null = null;
-let parseQueued = false;
-
-async function parseRolloutSafely(): Promise<RolloutParseResult | null> {
-  if (parseInFlight) {
-    parseQueued = true;
-    return parseInFlight;
-  }
-
-  parseInFlight = (async () => {
-    let result = await rolloutParser.parse();
-    while (parseQueued) {
-      parseQueued = false;
-      result = await rolloutParser.parse();
-    }
-    return result;
-  })();
-
-  try {
-    return await parseInFlight;
-  } finally {
-    parseInFlight = null;
-  }
-}
+const parseRolloutSafely = createParseQueue(() => rolloutParser.parse());
 
 /**
  * Collect all HUD data (synchronous parts)

@@ -41,6 +41,14 @@ export interface RolloutParseOutput {
   wasTruncated: boolean;
 }
 
+export function computeNextOffset(
+  startOffset: number,
+  bytesRead: number,
+  latestSize: number
+): number {
+  return Math.min(latestSize, startOffset + bytesRead);
+}
+
 /**
  * Extract target/path from tool arguments for display
  */
@@ -276,19 +284,21 @@ export async function parseRolloutFile(
       }
     });
 
+    const computeNewOffset = (): number => {
+      const latestSize = fs.statSync(rolloutPath).size;
+      return computeNextOffset(startOffset, fileStream.bytesRead, latestSize);
+    };
+
     rl.on('close', () => {
-      const newOffset = Math.min(fileSize, startOffset + fileStream.bytesRead);
-      finish(newOffset);
+      finish(computeNewOffset());
     });
 
     rl.on('error', () => {
-      const newOffset = Math.min(fileSize, startOffset + fileStream.bytesRead);
-      finish(newOffset);
+      finish(computeNewOffset());
     });
 
     fileStream.on('error', () => {
-      const newOffset = Math.min(fileSize, startOffset + fileStream.bytesRead);
-      finish(newOffset);
+      finish(computeNewOffset());
     });
   });
 }

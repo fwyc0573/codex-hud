@@ -10,4 +10,5 @@
 - [completed] Merge PR and preserve README from main.
 - [completed] Implement required code fixes.
 - [completed] Update .gitignore for .kiro/ and .serena/.
-- [in-progress] Add tests, run validation, write report (blocked: npm missing).
+- [completed] Add tests, run validation, write report (blocked locally; user reported tests completed).
+- [completed] Remove .serena/.kiro from history using git filter-branch.

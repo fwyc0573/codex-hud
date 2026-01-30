@@ -31,7 +31,7 @@ function renderCompactLayout(data: HudData, layout: LayoutConfig, width: number)
   const parts: string[] = [];
   
   // Identity (model + context bar)
-  parts.push(renderIdentityLine(data, layout));
+  parts.push(renderIdentityLine(data, layout, { maxWidth: width }));
   
   // Project + git
   parts.push(renderProjectLine(data));
@@ -79,7 +79,7 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig, width: number
   
   // Row 1: Identity | Project | Duration
   const row1Parts: string[] = [];
-  const identityLine = renderIdentityLine(data, layout);
+  const identityLine = renderIdentityLine(data, layout, { maxWidth: width });
   row1Parts.push(identityLine);
   row1Parts.push(renderProjectLine(data));
   

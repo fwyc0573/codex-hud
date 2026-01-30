@@ -70,7 +70,8 @@ export function renderSessionLine(data: HudData, layout: LayoutConfig): string {
   
   // Duration
   if (layout.showDuration) {
-    const duration = formatDuration(data.sessionStart);
+    const startTime = data.session?.startTime ?? data.sessionStart;
+    const duration = formatDuration(startTime);
     parts.push(colors.dim(`${icons.clock} ${duration}`));
   }
   

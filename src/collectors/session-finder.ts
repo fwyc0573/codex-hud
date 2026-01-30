@@ -19,6 +19,18 @@ export interface SessionFile {
 
 export { getCodexHome, getSessionsDir };
 
+function normalizePath(input?: string | null): string | null {
+  if (!input) {
+    return null;
+  }
+
+  try {
+    return fs.realpathSync(input);
+  } catch {
+    return path.resolve(input);
+  }
+}
+
 /**
  * Peek at the first line of a rollout file to get its CWD
  */
@@ -64,7 +76,7 @@ function peekRolloutCwd(filePath: string): string | null {
 
     const entry = JSON.parse(firstLine.trim());
     if (entry.type === 'session_meta' && entry.payload) {
-      return entry.payload.cwd;
+      return normalizePath(entry.payload.cwd);
     }
   } catch {
     // Ignore errors or malformed files
@@ -175,6 +187,7 @@ export function findMostRecentRollout(
   maxDaysBack: number = DEFAULT_LOOKBACK_DAYS,
   targetCwd?: string
 ): SessionFile | null {
+  const normalizedTarget = normalizePath(targetCwd);
   const sessionsDir = getSessionsDir();
 
   if (!fs.existsSync(sessionsDir)) {
@@ -198,8 +211,8 @@ export function findMostRecentRollout(
     
     // Filter by CWD if provided
     let sessions = rolloutsInDay;
-    if (targetCwd) {
-      sessions = sessions.filter(r => peekRolloutCwd(r.path) === targetCwd);
+    if (normalizedTarget) {
+      sessions = sessions.filter(r => peekRolloutCwd(r.path) === normalizedTarget);
     }
     
     allSessions = allSessions.concat(sessions);
@@ -225,6 +238,7 @@ export function findActiveRollouts(
   targetCwd?: string,
   maxDaysBack: number = DEFAULT_LOOKBACK_DAYS
 ): SessionFile[] {
+  const normalizedTarget = normalizePath(targetCwd);
   const sessionsDir = getSessionsDir();
 
   if (!fs.existsSync(sessionsDir)) {
@@ -251,7 +265,7 @@ export function findActiveRollouts(
   return rollouts
     .filter((r) => {
       if (r.modifiedAt < cutoff) return false;
-      if (targetCwd && peekRolloutCwd(r.path) !== targetCwd) return false;
+      if (normalizedTarget && peekRolloutCwd(r.path) !== normalizedTarget) return false;
       return true;
     })
     .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
@@ -348,45 +362,48 @@ export class SessionFinder {
    * Check for active or recent sessions
    */
   check(): SessionFile | null {
-    // If we already have a session, keep it unless the file disappears
-    if (this.currentSession) {
-      if (fs.existsSync(this.currentSession.path)) {
-        try {
-          const stats = fs.statSync(this.currentSession.path);
-          this.currentSession.modifiedAt = stats.mtime;
-          this.currentSession.size = stats.size;
-        } catch {
-          // ignore stat errors
-        }
-        return this.currentSession;
+    const current = this.currentSession;
+    const currentExists = current ? fs.existsSync(current.path) : false;
+
+    if (current && currentExists) {
+      try {
+        const stats = fs.statSync(current.path);
+        current.modifiedAt = stats.mtime;
+        current.size = stats.size;
+      } catch {
+        // ignore stat errors
       }
-
-      // Session file removed
+    } else if (current && !currentExists) {
       this.currentSession = null;
       this.onSessionChange?.(null);
     }
 
-    // First, look for actively modified sessions (within last 60s)
-    const active = findActiveRollouts(60, this.targetCwd || undefined, DEFAULT_LOOKBACK_DAYS);
-    const activeMatch = this.selectBestSession(active);
-    if (activeMatch) {
-      this.currentSession = activeMatch;
-      this.onSessionChange?.(activeMatch);
-      return activeMatch;
+    let next: SessionFile | null = null;
+    if (this.targetStartTime) {
+      // When a target start time is known, prefer the closest session by timestamp
+      next = this.findBestRecentSession();
     }
 
-    // Fall back to most recent rollout
-    const recent = this.findBestRecentSession();
-    if (recent) {
-      this.currentSession = recent;
-      this.onSessionChange?.(recent);
-      return recent;
+    if (!next) {
+      // Prefer an active session if available
+      const active = findActiveRollouts(60, this.targetCwd || undefined, DEFAULT_LOOKBACK_DAYS);
+      next = this.selectBestSession(active);
     }
 
-    // No session found
-    if (this.currentSession !== null) {
-      this.currentSession = null;
-      this.onSessionChange?.(null);
+    if (!next) {
+      next = this.findBestRecentSession();
+    }
+
+    if (next) {
+      if (!this.currentSession || this.currentSession.path !== next.path) {
+        this.currentSession = next;
+        this.onSessionChange?.(next);
+      }
+      return this.currentSession;
+    }
+
+    if (this.currentSession && currentExists) {
+      return this.currentSession;
     }
 
     return null;

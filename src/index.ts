@@ -4,6 +4,7 @@
  */
 
 import { readCodexConfig } from './collectors/codex-config.js';
+import * as fs from 'fs';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
 import { SessionFinder, findActiveRollouts } from './collectors/session-finder.js';
@@ -29,6 +30,13 @@ const REFRESH_INTERVAL = 1000;
 
 // Current working directory for the HUD
 const HUD_CWD = process.env.CODEX_HUD_CWD || process.cwd();
+const HUD_CWD_REAL = (() => {
+  try {
+    return fs.realpathSync(HUD_CWD);
+  } catch {
+    return HUD_CWD;
+  }
+})();
 
 // Optional HUD session start time (for session isolation)
 const HUD_SESSION_START = (() => {
@@ -58,23 +66,24 @@ function getNonCachedInputTokens(usage: TokenUsage | undefined): number {
   return Math.max(0, input - cached);
 }
 
-function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
+function baselineAdjustedUsedTokens(tokensInContext: number, contextWindow: number): number {
   if (contextWindow <= 0) {
     return 0;
   }
 
   const baseline = Math.min(BASELINE_TOKENS, contextWindow);
-  const effectiveWindow = contextWindow - baseline;
-  if (effectiveWindow <= 0) {
-    const used = Math.max(0, Math.min(contextWindow, tokensInContext));
-    const remaining = Math.max(0, contextWindow - used);
-    const percent = (remaining / contextWindow) * 100;
-    return Math.round(Math.max(0, Math.min(100, percent)));
+  const used = Math.max(0, tokensInContext) + baseline;
+  return Math.max(0, Math.min(contextWindow, used));
+}
+
+function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
+  if (contextWindow <= 0) {
+    return 0;
   }
 
-  const used = Math.max(0, tokensInContext - baseline);
-  const remaining = Math.max(0, effectiveWindow - used);
-  const percent = (remaining / effectiveWindow) * 100;
+  const used = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
+  const remaining = Math.max(0, contextWindow - used);
+  const percent = (remaining / contextWindow) * 100;
   return Math.round(Math.max(0, Math.min(100, percent)));
 }
 
@@ -92,11 +101,12 @@ function buildContextUsage(
 
   if (contextWindow > 0 && lastUsage) {
     const tokensInContext = lastUsage.total_tokens ?? 0;
+    const usedWithBaseline = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
     const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
     const percentUsed = 100 - percentRemaining;
 
     return {
-      used: tokensInContext,
+      used: usedWithBaseline,
       total: contextWindow,
       percent: percentUsed,
       inputTokens: getNonCachedInputTokens(lastUsage),
@@ -111,7 +121,7 @@ function buildContextUsage(
 }
 
 // Phase 2: Session and rollout tracking
-const sessionFinder = new SessionFinder(HUD_CWD, (session) => {
+const sessionFinder = new SessionFinder(HUD_CWD_REAL, (session) => {
   // When session changes, update rollout path
   if (session) {
     rolloutParser.setRolloutPath(session.path);

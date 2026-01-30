@@ -194,7 +194,11 @@ codex-hud enables tmux mouse mode for each session to make trackpad scrolling sm
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CODEX_HUD_POSITION` | HUD pane position: `bottom`, `top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD pane height in lines | 1/6 of terminal height (min 3) |
+| `CODEX_HUD_HEIGHT` | HUD base height in lines | 1/6 of terminal height (min 5) |
+| `CODEX_HUD_HEIGHT_AUTO` | Auto-adjust HUD height based on pane width | `0` |
+| `CODEX_HUD_HEIGHT_MIN` | Minimum HUD height when auto-adjusting | `CODEX_HUD_HEIGHT` |
+| `CODEX_HUD_HEIGHT_MAX` | Maximum HUD height when auto-adjusting | `12` |
+| `CODEX_HUD_CLEAR_SCROLLBACK` | Clear terminal scrollback on each refresh | `0` |
 | `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
 | `CODEX_HUD_CWD` | Override working directory used for HUD context/session matching | (unset; wrapper sets) |
 
@@ -212,9 +216,15 @@ CODEX_HUD_POSITION=top codex
 
 # Taller HUD
 CODEX_HUD_HEIGHT=5 codex
+
+# Adaptive HUD height (disable auto with 0)
+CODEX_HUD_HEIGHT=5 CODEX_HUD_HEIGHT_AUTO=1 codex
+
+# Clear scrollback on each refresh
+CODEX_HUD_CLEAR_SCROLLBACK=1 codex
 ```
 
-Note: HUD height is clamped to the available terminal size.
+Note: HUD height is always clamped to the available terminal size.
 
 ## Display Format
 
@@ -246,13 +256,13 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
 - `Sandbox: mode` - Sandbox mode (if configured)
 
 ### Line 3: Tokens + Context
-- `Tokens: N` - Total tokens (with input/cache/output breakdown when available)
+- `Tokens: N` - Latest turn tokens (falls back to total when last usage is unavailable)
 - `Ctx: ███░░ 45% (used/total)` - Context usage bar and counts
 - `↻N` - Compact count when `/compact` events occur
 
 ### Line 4: Session Details
 - `Dir: ~/path` - Working directory (truncated)
-- `Session: abc12345` - Session ID (short)
+- `Session: abc12345` - Session ID (short, prefix + suffix when available)
 - `CLI: x.y.z` / `Provider: openai` - Optional session metadata
 
 ### Line 5+: Activity

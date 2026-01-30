@@ -201,7 +201,11 @@ codex-hud 会为每个 tmux 会话启用鼠标模式，以让触控板滚动在 
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
 | `CODEX_HUD_POSITION` | HUD 面板位置：`bottom`、`top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | 终端高度的 1/6（最小 3） |
+| `CODEX_HUD_HEIGHT` | HUD 基础高度（行数） | 终端高度的 1/6（最小 5） |
+| `CODEX_HUD_HEIGHT_AUTO` | 根据面板宽度自动调整 HUD 高度 | `0` |
+| `CODEX_HUD_HEIGHT_MIN` | 自动调整时的最小高度 | `CODEX_HUD_HEIGHT` |
+| `CODEX_HUD_HEIGHT_MAX` | 自动调整时的最大高度 | `12` |
+| `CODEX_HUD_CLEAR_SCROLLBACK` | 每次刷新清空终端滚动历史 | `0` |
 | `CODEX_HUD_NO_ATTACH` | 如果设置，总是创建新会话 | （未设置） |
 | `CODEX_HUD_CWD` | 覆盖 HUD 使用的工作目录（用于上下文/会话匹配） | （未设置；由 wrapper 设置） |
 
@@ -219,9 +223,15 @@ CODEX_HUD_POSITION=top codex
 
 # 更高的 HUD
 CODEX_HUD_HEIGHT=5 codex
+
+# 自适应 HUD 高度（关闭自适应可设为 0）
+CODEX_HUD_HEIGHT=5 CODEX_HUD_HEIGHT_AUTO=1 codex
+
+# 每次刷新清空滚动历史
+CODEX_HUD_CLEAR_SCROLLBACK=1 codex
 ```
 
-Note: HUD height is clamped to the available terminal size.
+注意：HUD 高度会被限制在终端可用范围内。
 
 ## 显示格式
 
@@ -253,13 +263,13 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2 | Provider: openai
 - `Sandbox: mode` - Sandbox 模式（如果已配置）
 
 ### 第三行：Tokens + Context
-- `Tokens: N` - 总 Token（可带输入/cache/输出拆分）
+- `Tokens: N` - 最新回合 Token（若缺失则回退到累计值）
 - `Ctx: ███░░ 45% (used/total)` - Context 使用条与计数
 - `↻N` - `/compact` 次数
 
 ### 第四行：Session 详情
 - `Dir: ~/path` - 工作目录（截断显示）
-- `Session: abc12345` - Session ID（短版）
+- `Session: abc12345` - Session ID（短版，前缀 + 后缀）
 - `CLI: x.y.z` / `Provider: openai` - 可选 session 元数据
 
 ### 第五行及以后：活动

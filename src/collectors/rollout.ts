@@ -141,11 +141,31 @@ export async function parseRolloutFile(
       crlfDelay: Infinity,
     });
 
-    let bytesRead = startOffset;
+    let resolved = false;
+    const finish = (newOffset: number) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve({
+        result: {
+          session,
+          toolActivity,
+          planProgress,
+          tokenUsage,
+          compactCount,
+          lastCompactTime,
+          lastToolActivityTime,
+          lastAssistantMessageTime,
+          lastEventTime,
+        },
+        newOffset,
+        runningCalls,
+        wasTruncated,
+      });
+    };
 
     rl.on('line', (line) => {
-      bytesRead += Buffer.byteLength(line, 'utf8') + 1; // +1 for newline
-
       if (!line.trim()) return;
 
       try {
@@ -257,41 +277,18 @@ export async function parseRolloutFile(
     });
 
     rl.on('close', () => {
-      resolve({
-        result: {
-          session,
-          toolActivity,
-          planProgress,
-          tokenUsage,
-          compactCount,
-          lastCompactTime,
-          lastToolActivityTime,
-          lastAssistantMessageTime,
-          lastEventTime,
-        },
-        newOffset: bytesRead,
-        runningCalls,
-        wasTruncated,
-      });
+      const newOffset = Math.min(fileSize, startOffset + fileStream.bytesRead);
+      finish(newOffset);
     });
 
     rl.on('error', () => {
-      resolve({
-        result: {
-          session,
-          toolActivity,
-          planProgress,
-          tokenUsage,
-          compactCount,
-          lastCompactTime,
-          lastToolActivityTime,
-          lastAssistantMessageTime,
-          lastEventTime,
-        },
-        newOffset: startOffset,
-        runningCalls,
-        wasTruncated,
-      });
+      const newOffset = Math.min(fileSize, startOffset + fileStream.bytesRead);
+      finish(newOffset);
+    });
+
+    fileStream.on('error', () => {
+      const newOffset = Math.min(fileSize, startOffset + fileStream.bytesRead);
+      finish(newOffset);
     });
   });
 }

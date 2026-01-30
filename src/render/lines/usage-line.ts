@@ -33,7 +33,8 @@ export function renderUsageLine(data: HudData, layout: LayoutConfig): string | n
   if (!layout.showDuration) {
     return null;
   }
-  
-  const duration = formatDuration(data.sessionStart);
+
+  const startTime = data.session?.startTime ?? data.sessionStart;
+  const duration = formatDuration(startTime);
   return colors.dim(`${icons.clock} ${duration}`);
 }

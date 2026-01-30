@@ -171,6 +171,41 @@ export function truncate(text: string, maxWidth: number, ellipsis = '…'): stri
 }
 
 /**
+ * Truncate text to a visual width while preserving ANSI sequences.
+ */
+export function truncateAnsi(text: string, maxWidth: number, ellipsis = '…'): string {
+  if (maxWidth <= 0) return '';
+  if (visualLength(text) <= maxWidth) return text;
+
+  const limit = Math.max(0, maxWidth - ellipsis.length);
+  let out = '';
+  let visible = 0;
+  let i = 0;
+  let sawAnsi = false;
+
+  while (i < text.length && visible < limit) {
+    const ch = text[i];
+    if (ch === '\x1b' && text[i + 1] === '[') {
+      const end = text.indexOf('m', i + 2);
+      if (end === -1) {
+        break;
+      }
+      out += text.slice(i, end + 1);
+      sawAnsi = true;
+      i = end + 1;
+      continue;
+    }
+    out += ch;
+    visible += 1;
+    i += 1;
+  }
+
+  const truncated = out + ellipsis;
+  if (!sawAnsi) return truncated;
+  return truncated + RESET;
+}
+
+/**
  * Get the appropriate color function based on context usage percentage
  */
 export function getContextColor(percent: number): (text: string) => string {

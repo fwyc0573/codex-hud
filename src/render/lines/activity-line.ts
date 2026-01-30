@@ -177,8 +177,18 @@ function renderContextProgressBar(percent: number, width: number = 10): string {
   return colorFn(filledStr) + colors.dim(emptyStr);
 }
 
+function formatSessionId(sessionId: string): string {
+  if (sessionId.length <= 8) {
+    return sessionId;
+  }
+  if (sessionId.length <= 12) {
+    return sessionId.slice(0, 8);
+  }
+  return `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`;
+}
+
 export function renderTokenLine(data: HudData): string | null {
-  const usage = data.tokenUsage?.total_token_usage;
+  const usage = data.tokenUsage?.last_token_usage ?? data.tokenUsage?.total_token_usage;
   // Always show token line if we have any token or context data
   if (!usage && !data.contextUsage) {
     return null;
@@ -265,9 +275,7 @@ export function renderSessionDetailLine(data: HudData): string | null {
 
   // Show session ID if available
   if (session?.id) {
-    // Show short version of session ID (first 8 chars)
-    const shortId = session.id.length > 8 ? session.id.slice(0, 8) : session.id;
-    parts.push(colors.dim('Session: ') + theme.info(shortId));
+    parts.push(colors.dim('Session: ') + theme.info(formatSessionId(session.id)));
   }
   
   // Show CLI version if available

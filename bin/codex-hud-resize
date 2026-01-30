@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -e
+
+session_name="$1"
+
+if [[ -z "$session_name" ]]; then
+    session_name=$(tmux display -p "#{session_name}" 2>/dev/null || true)
+fi
+
+if [[ -z "$session_name" ]]; then
+    exit 0
+fi
+
+pane=$(tmux show-option -t "$session_name" -qv @codex_hud_pane)
+base_height=$(tmux show-option -t "$session_name" -qv @codex_hud_base_height)
+height=$(tmux show-option -t "$session_name" -qv @codex_hud_height)
+
+is_positive_int() {
+    [[ "$1" =~ ^[0-9]+$ ]] && [[ "$1" -gt 0 ]]
+}
+
+if [[ -z "$pane" ]]; then
+    exit 0
+fi
+
+if [[ -z "$base_height" ]]; then
+    base_height="$height"
+fi
+
+if [[ -z "$base_height" ]]; then
+    exit 0
+fi
+
+auto=$(tmux show-option -t "$session_name" -qv @codex_hud_auto)
+max_height=$(tmux show-option -t "$session_name" -qv @codex_hud_height_max)
+min_height=$(tmux show-option -t "$session_name" -qv @codex_hud_height_min)
+
+if [[ -z "$auto" ]]; then
+    auto="${CODEX_HUD_HEIGHT_AUTO:-0}"
+fi
+if [[ -z "$max_height" ]]; then
+    max_height="${CODEX_HUD_HEIGHT_MAX:-12}"
+fi
+if [[ -z "$min_height" ]]; then
+    min_height="${CODEX_HUD_HEIGHT_MIN:-$base_height}"
+fi
+
+if ! is_positive_int "$min_height"; then
+    min_height="$base_height"
+fi
+if ! is_positive_int "$max_height"; then
+    max_height="12"
+fi
+
+target="$base_height"
+
+if [[ "$auto" != "0" ]]; then
+    if [[ "$target" -lt "$min_height" ]]; then
+        target="$min_height"
+    fi
+    if [[ "$target" -gt "$max_height" ]]; then
+        target="$max_height"
+    fi
+fi
+
+tmux set-option -t "$session_name" -q @codex_hud_height "$target"
+
+current=$(tmux display -p -t "$pane" "#{pane_height}" 2>/dev/null || true)
+if [[ -n "$current" && "$current" != "$target" ]]; then
+    tmux resize-pane -t "$pane" -y "$target" 2>/dev/null || true
+fi

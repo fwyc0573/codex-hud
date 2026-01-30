@@ -4,10 +4,11 @@
  */
 
 import { readCodexConfig } from './collectors/codex-config.js';
+import * as fs from 'fs';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
 import { SessionFinder, findActiveRollouts } from './collectors/session-finder.js';
-import { RolloutParser, parseRolloutFile } from './collectors/rollout.js';
+import { RolloutParser, parseRolloutFile, type RolloutParseResult } from './collectors/rollout.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
 import { BASELINE_TOKENS } from './types.js';
@@ -29,6 +30,13 @@ const REFRESH_INTERVAL = 1000;
 
 // Current working directory for the HUD
 const HUD_CWD = process.env.CODEX_HUD_CWD || process.cwd();
+const HUD_CWD_REAL = (() => {
+  try {
+    return fs.realpathSync(HUD_CWD);
+  } catch {
+    return HUD_CWD;
+  }
+})();
 
 // Optional HUD session start time (for session isolation)
 const HUD_SESSION_START = (() => {
@@ -58,15 +66,24 @@ function getNonCachedInputTokens(usage: TokenUsage | undefined): number {
   return Math.max(0, input - cached);
 }
 
-function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
-  if (contextWindow <= BASELINE_TOKENS) {
+function baselineAdjustedUsedTokens(tokensInContext: number, contextWindow: number): number {
+  if (contextWindow <= 0) {
     return 0;
   }
 
-  const effectiveWindow = contextWindow - BASELINE_TOKENS;
-  const used = Math.max(0, tokensInContext - BASELINE_TOKENS);
-  const remaining = Math.max(0, effectiveWindow - used);
-  const percent = (remaining / effectiveWindow) * 100;
+  const baseline = Math.min(BASELINE_TOKENS, contextWindow);
+  const used = Math.max(0, tokensInContext) + baseline;
+  return Math.max(0, Math.min(contextWindow, used));
+}
+
+function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
+  if (contextWindow <= 0) {
+    return 0;
+  }
+
+  const used = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
+  const remaining = Math.max(0, contextWindow - used);
+  const percent = (remaining / contextWindow) * 100;
   return Math.round(Math.max(0, Math.min(100, percent)));
 }
 
@@ -84,11 +101,12 @@ function buildContextUsage(
 
   if (contextWindow > 0 && lastUsage) {
     const tokensInContext = lastUsage.total_tokens ?? 0;
+    const usedWithBaseline = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
     const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
     const percentUsed = 100 - percentRemaining;
 
     return {
-      used: tokensInContext,
+      used: usedWithBaseline,
       total: contextWindow,
       percent: percentUsed,
       inputTokens: getNonCachedInputTokens(lastUsage),
@@ -103,7 +121,7 @@ function buildContextUsage(
 }
 
 // Phase 2: Session and rollout tracking
-const sessionFinder = new SessionFinder(HUD_CWD, (session) => {
+const sessionFinder = new SessionFinder(HUD_CWD_REAL, (session) => {
   // When session changes, update rollout path
   if (session) {
     rolloutParser.setRolloutPath(session.path);
@@ -117,6 +135,30 @@ const hudFileWatcher = new HudFileWatcher();
 // Cached data that gets updated by watchers
 let cachedHudData: HudData | null = null;
 let configNeedsRefresh = false;
+let parseInFlight: Promise<RolloutParseResult | null> | null = null;
+let parseQueued = false;
+
+async function parseRolloutSafely(): Promise<RolloutParseResult | null> {
+  if (parseInFlight) {
+    parseQueued = true;
+    return parseInFlight;
+  }
+
+  parseInFlight = (async () => {
+    let result = await rolloutParser.parse();
+    while (parseQueued) {
+      parseQueued = false;
+      result = await rolloutParser.parse();
+    }
+    return result;
+  })();
+
+  try {
+    return await parseInFlight;
+  } finally {
+    parseInFlight = null;
+  }
+}
 
 /**
  * Collect all HUD data (synchronous parts)
@@ -194,7 +236,7 @@ async function collectData(): Promise<HudData> {
   // If we have a session, parse the rollout
   let rolloutData = rolloutParser.getCached();
   if (session && (!rolloutData || configNeedsRefresh)) {
-    rolloutData = await rolloutParser.parse();
+    rolloutData = await parseRolloutSafely();
     configNeedsRefresh = false;
   }
 
@@ -290,7 +332,7 @@ async function main(): Promise<void> {
 
   hudFileWatcher.onRolloutChange(async () => {
     // Re-parse rollout when file changes
-    await rolloutParser.parse();
+    await parseRolloutSafely();
   });
 
   hudFileWatcher.start();

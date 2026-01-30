@@ -5,7 +5,7 @@
  */
 
 import type { HudData, ContextUsage, LayoutConfig } from '../../types.js';
-import { theme, colors, coloredBar, coloredPercent, icons } from '../colors.js';
+import { theme, colors, coloredBar, coloredPercent, icons, truncate, truncateAnsi, visualLength } from '../colors.js';
 import { getModelDisplayName } from '../../collectors/codex-config.js';
 
 /**
@@ -46,28 +46,30 @@ function renderContextBreakdown(context: ContextUsage): string {
  * Render the identity line
  * Format: [Model] █████░░░░░ 45%
  */
-export function renderIdentityLine(data: HudData, layout: LayoutConfig): string {
+export function renderIdentityLine(
+  data: HudData,
+  layout: LayoutConfig,
+  options: { maxWidth?: number } = {}
+): string {
   const parts: string[] = [];
   
   // Model name in brackets
   const modelName = getModelDisplayName(data.config);
-  const modelDisplay = theme.modelBracket('[') + theme.model(modelName) + theme.modelBracket(']');
-  parts.push(modelDisplay);
-  
+  let contextDisplay = '';
+
   // Context usage bar (if available)
   if (data.contextUsage) {
     const ctx = data.contextUsage;
     const bar = coloredBar(ctx.percent, layout.barWidth);
     const percentStr = coloredPercent(ctx.percent);
     
-    let contextDisplay = `${bar} ${percentStr}`;
+    contextDisplay = `${bar} ${percentStr}`;
     
     // Add breakdown when usage is high
     if (layout.showContextBreakdown && ctx.percent >= 85) {
       contextDisplay += colors.dim(renderContextBreakdown(ctx));
     }
     
-    parts.push(contextDisplay);
   } else if (data.tokenUsage?.total_token_usage) {
     // Fallback to old token usage format
     const usage = data.tokenUsage.total_token_usage;
@@ -78,12 +80,33 @@ export function renderIdentityLine(data: HudData, layout: LayoutConfig): string 
       const percent = Math.round((total / contextWindow) * 100);
       const bar = coloredBar(percent, layout.barWidth);
       const percentStr = coloredPercent(percent);
-      parts.push(`${bar} ${percentStr}`);
+      contextDisplay = `${bar} ${percentStr}`;
     } else {
       // Just show token count without bar
-      parts.push(colors.dim(`Tokens: ${formatTokenCount(total)}`));
+      contextDisplay = colors.dim(`Tokens: ${formatTokenCount(total)}`);
     }
   }
+
+  const maxWidth = options.maxWidth;
+  let modelDisplay = theme.modelBracket('[') + theme.model(modelName) + theme.modelBracket(']');
+  if (maxWidth && maxWidth > 0) {
+    const contextLen = contextDisplay ? visualLength(contextDisplay) + 1 : 0;
+    const availableForModel = Math.max(0, maxWidth - contextLen);
+    if (availableForModel <= 2 && contextDisplay) {
+      return truncateAnsi(contextDisplay, maxWidth);
+    }
+    if (availableForModel > 2) {
+      const maxModelLen = Math.max(1, availableForModel - 2);
+      const trimmedModel = truncate(modelName, maxModelLen, '…');
+      modelDisplay = theme.modelBracket('[') + theme.model(trimmedModel) + theme.modelBracket(']');
+    }
+  }
+
+  parts.push(modelDisplay);
+  if (contextDisplay) {
+    parts.push(contextDisplay);
+  }
   
-  return parts.join(' ');
+  const line = parts.join(' ');
+  return maxWidth ? truncateAnsi(line, maxWidth) : line;
 }

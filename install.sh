@@ -304,6 +304,9 @@ build_project() {
 setup_wrapper() {
     step "Setting up wrapper script..."
     chmod +x "$WRAPPER_PATH"
+    if [[ -f "$SCRIPT_DIR/bin/codex-hud-resize" ]]; then
+        chmod +x "$SCRIPT_DIR/bin/codex-hud-resize"
+    fi
     info "Wrapper is executable"
 }
 

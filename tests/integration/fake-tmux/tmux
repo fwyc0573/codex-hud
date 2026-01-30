@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -e
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+  show-option)
+    opt="${@: -1}"
+    case "$opt" in
+      @codex_hud_pane)
+        echo "${TMUX_PANE_ID:-}"
+        ;;
+      @codex_hud_base_height)
+        echo "${TMUX_BASE_HEIGHT:-}"
+        ;;
+      @codex_hud_height)
+        echo "${TMUX_HEIGHT:-}"
+        ;;
+      @codex_hud_auto)
+        echo "${TMUX_AUTO:-}"
+        ;;
+      @codex_hud_height_max)
+        echo "${TMUX_HEIGHT_MAX:-}"
+        ;;
+      @codex_hud_height_min)
+        echo "${TMUX_HEIGHT_MIN:-}"
+        ;;
+      *)
+        echo ""
+        ;;
+    esac
+    ;;
+  display)
+    format="${@: -1}"
+    if [[ "$format" == "#{pane_width}" ]]; then
+      echo "${TMUX_PANE_WIDTH:-}"
+    else
+      echo "${TMUX_PANE_HEIGHT:-}"
+    fi
+    ;;
+  set-option)
+    opt="${@: -2:1}"
+    val="${@: -1}"
+    echo "${opt}=${val}" >> "${TMUX_LOG_FILE}"
+    ;;
+  resize-pane)
+    while [[ "$1" != "" ]]; do
+      if [[ "$1" == "-y" ]]; then
+        shift
+        echo "resize=${1}" >> "${TMUX_LOG_FILE}"
+        break
+      fi
+      shift
+    done
+    ;;
+  *)
+    exit 0
+    ;;
+esac

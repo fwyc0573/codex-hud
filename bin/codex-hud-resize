@@ -36,7 +36,7 @@ max_height=$(tmux show-option -t "$session_name" -qv @codex_hud_height_max)
 min_height=$(tmux show-option -t "$session_name" -qv @codex_hud_height_min)
 
 if [[ -z "$auto" ]]; then
-    auto="${CODEX_HUD_HEIGHT_AUTO:-0}"
+    auto="${CODEX_HUD_HEIGHT_AUTO:-1}"
 fi
 if [[ -z "$max_height" ]]; then
     max_height="${CODEX_HUD_HEIGHT_MAX:-12}"
@@ -55,6 +55,18 @@ fi
 target="$base_height"
 
 if [[ "$auto" != "0" ]]; then
+    pane_width=$(tmux display -p -t "$pane" "#{pane_width}" 2>/dev/null || true)
+    extra_lines=0
+    if is_positive_int "$pane_width"; then
+        if [[ "$pane_width" -lt 60 ]]; then
+            extra_lines=3
+        elif [[ "$pane_width" -lt 80 ]]; then
+            extra_lines=2
+        elif [[ "$pane_width" -lt 100 ]]; then
+            extra_lines=1
+        fi
+    fi
+    target=$((base_height + extra_lines))
     if [[ "$target" -lt "$min_height" ]]; then
         target="$min_height"
     fi

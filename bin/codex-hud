@@ -6,6 +6,9 @@
 # Environment variables:
 #   CODEX_HUD_POSITION - HUD pane position: bottom (default), top
 #   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 1/6 of terminal height, min 5)
+#   CODEX_HUD_HEIGHT_AUTO - Auto-adjust HUD height based on pane width (default: 1)
+#   CODEX_HUD_HEIGHT_MIN - Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
+#   CODEX_HUD_HEIGHT_MAX - Maximum HUD height when auto-adjusting (default: 12)
 #   CODEX_HUD_NO_ATTACH - If set, don't attach to existing session
 #   CODEX_HUD_CLEAR_SCROLLBACK - If set to 1, clears tmux scrollback on first render
 #
@@ -521,6 +524,10 @@ Options:
 Environment Variables:
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
   CODEX_HUD_HEIGHT    HUD pane height in lines (default: 1/6 of terminal height, min 5)
+  CODEX_HUD_HEIGHT_AUTO Auto-adjust HUD height based on pane width (default: 1)
+  CODEX_HUD_HEIGHT_MIN Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
+  CODEX_HUD_HEIGHT_MAX Maximum HUD height when auto-adjusting (default: 12)
+  CODEX_HUD_CLEAR_SCROLLBACK Clear terminal scrollback on first render (default: 0)
   CODEX_HUD_NO_ATTACH If set, always create new session
 
 Requirements:

@@ -5,6 +5,13 @@
 
 # Codex HUD
 
+## Modification History
+
+| Date       | Summary of Changes                          |
+|------------|---------------------------------------------|
+| 2026-02-09 | Keep Codex pane focused after resize and refine mouse-scroll defaults |
+| 2026-02-09 | Update session attach defaults and scrollback-related configuration docs |
+
 ![Codex HUD](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
 
 Real-time statusline HUD for OpenAI Codex CLI.
@@ -181,21 +188,34 @@ codex-hud --list
 # Show help
 codex-hud --help
 
+# Intentionally attach to an existing session
+codex-hud --attach
+
+# Always create a new session for this launch
+codex-hud --new-session
+
 # Run environment diagnostics
 codex-hud --self-check
 ```
 
 ### Scrolling in Codex CLI Pane
 
-codex-hud enables tmux mouse mode for each session to make trackpad scrolling smoother and more controllable in the Codex CLI pane.
+codex-hud enables tmux mouse mode by default so trackpad/mouse wheel scrolling works in the Codex pane. Resize hooks also reselect the main Codex pane to keep input focus stable. By default, it sets `alternate-screen` to `off` so history remains scrollable. Set `CODEX_HUD_MOUSE=0` only if you prefer tmux mouse mode disabled.
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CODEX_HUD_POSITION` | HUD pane position: `bottom`, `top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD pane height in lines | 1/6 of terminal height (min 3) |
-| `CODEX_HUD_NO_ATTACH` | If set, always create new session | (unset) |
+| `CODEX_HUD_HEIGHT` | HUD pane height in lines | 1/6 of terminal height (min 5) |
+| `CODEX_HUD_HEIGHT_AUTO` | Auto-adjust HUD height based on pane width | `0` |
+| `CODEX_HUD_HEIGHT_MIN` | Minimum HUD height in auto mode | `CODEX_HUD_HEIGHT` |
+| `CODEX_HUD_HEIGHT_MAX` | Maximum HUD height in auto mode | `12` |
+| `CODEX_HUD_AUTO_ATTACH` | Auto-attach to the latest existing session in the same directory | `0` |
+| `CODEX_HUD_NO_ATTACH` | Deprecated: force a new session (overrides auto attach) | (unset) |
+| `CODEX_HUD_ALTERNATE_SCREEN` | Set tmux `alternate-screen` for the codex pane (`0`/`1`) | `0` |
+| `CODEX_HUD_MOUSE` | Enable tmux mouse mode for wheel/trackpad scrolling (`0`/`1`) | `1` |
+| `CODEX_HUD_CLEAR_SCROLLBACK` | Clear tmux scrollback on HUD first render | `0` |
 | `CODEX_HUD_CWD` | Override working directory used for HUD context/session matching | (unset; wrapper sets) |
 
 ### Path Overrides

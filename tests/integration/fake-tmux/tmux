@@ -4,6 +4,28 @@ set -e
 cmd="$1"
 shift || true
 
+append_log() {
+  if [[ -n "${TMUX_LOG_FILE:-}" ]]; then
+    echo "$1" >> "${TMUX_LOG_FILE}"
+  fi
+}
+
+extract_target() {
+  local args=("$@")
+  local idx=0
+  while [[ $idx -lt ${#args[@]} ]]; do
+    if [[ "${args[$idx]}" == "-t" ]]; then
+      local next_idx=$((idx + 1))
+      if [[ $next_idx -lt ${#args[@]} ]]; then
+        echo "${args[$next_idx]}"
+        return 0
+      fi
+    fi
+    idx=$((idx + 1))
+  done
+  echo ""
+}
+
 case "$cmd" in
   show-option)
     opt="${@: -1}"
@@ -26,35 +48,107 @@ case "$cmd" in
       @codex_hud_height_min)
         echo "${TMUX_HEIGHT_MIN:-}"
         ;;
+      @codex_hud_main_pane)
+        echo "${TMUX_STORED_MAIN_PANE:-${TMUX_MAIN_PANE_ID:-}}"
+        ;;
+      @codex_hud_focus_main)
+        echo "${TMUX_FOCUS_MAIN:-}"
+        ;;
       *)
-        echo ""
+        echo "${TMUX_SHOW_OPTION_DEFAULT:-}"
         ;;
     esac
     ;;
   display)
     format="${@: -1}"
-    if [[ "$format" == "#{pane_width}" ]]; then
-      echo "${TMUX_PANE_WIDTH:-}"
-    else
-      echo "${TMUX_PANE_HEIGHT:-}"
+    target=$(extract_target "$@")
+    case "$format" in
+      "#{pane_width}")
+        echo "${TMUX_PANE_WIDTH:-}"
+        ;;
+      "#{pane_height}")
+        echo "${TMUX_PANE_HEIGHT:-}"
+        ;;
+      "#{pane_in_mode}")
+        if [[ -n "${TMUX_MAIN_PANE_ID:-}" && "$target" == "${TMUX_MAIN_PANE_ID}" ]]; then
+          echo "${TMUX_MAIN_PANE_IN_MODE:-0}"
+        else
+          echo "${TMUX_PANE_IN_MODE:-0}"
+        fi
+        ;;
+      "#{session_name}")
+        echo "${TMUX_SESSION_NAME:-}"
+        ;;
+      *)
+        echo "${TMUX_DISPLAY_DEFAULT:-}"
+        ;;
+    esac
+    ;;
+  list-panes)
+    append_log "list-panes $*"
+    if [[ -n "${TMUX_PANES:-}" ]]; then
+      printf "%b\n" "${TMUX_PANES}"
+    elif [[ -n "${TMUX_MAIN_PANE_ID:-}" || -n "${TMUX_PANE_ID:-}" ]]; then
+      printf "%s\n" "${TMUX_MAIN_PANE_ID:-%1}" "${TMUX_PANE_ID:-%2}"
     fi
     ;;
+  list-sessions)
+    append_log "list-sessions $*"
+    if [[ -n "${TMUX_SESSION_LIST:-}" ]]; then
+      printf "%b\n" "${TMUX_SESSION_LIST}"
+    fi
+    ;;
+  split-window)
+    append_log "split-window $*"
+    echo "${TMUX_SPLIT_PANE_ID:-${TMUX_PANE_ID:-%2}}"
+    ;;
   set-option)
+    append_log "set-option $*"
     opt="${@: -2:1}"
     val="${@: -1}"
-    echo "${opt}=${val}" >> "${TMUX_LOG_FILE}"
+    if [[ -n "${TMUX_LOG_FILE:-}" ]]; then
+      echo "${opt}=${val}" >> "${TMUX_LOG_FILE}"
+    fi
+    ;;
+  set-window-option)
+    target=$(extract_target "$@")
+    if [[ "${TMUX_REJECT_TARGET_0:-0}" == "1" && "$target" == *:0 ]]; then
+      echo "no such window: ${target}" >&2
+      exit 1
+    fi
+
+    append_log "set-window-option $*"
+    if [[ -n "${TMUX_LOG_FILE:-}" ]]; then
+      opt="${@: -2:1}"
+      val="${@: -1}"
+      echo "window:${opt}=${val}" >> "${TMUX_LOG_FILE}"
+    fi
     ;;
   resize-pane)
-    while [[ "$1" != "" ]]; do
+    append_log "resize-pane $*"
+    while [[ "${1:-}" != "" ]]; do
       if [[ "$1" == "-y" ]]; then
         shift
-        echo "resize=${1}" >> "${TMUX_LOG_FILE}"
+        if [[ -n "${TMUX_LOG_FILE:-}" ]]; then
+          echo "resize=${1}" >> "${TMUX_LOG_FILE}"
+        fi
         break
       fi
       shift
     done
     ;;
+  new-session|send-keys|select-pane|attach-session|set-hook|bind-key|kill-session)
+    append_log "$cmd $*"
+    ;;
+  has-session)
+    append_log "has-session $*"
+    if [[ "${TMUX_HAS_SESSION:-0}" == "1" ]]; then
+      exit 0
+    fi
+    exit 1
+    ;;
   *)
+    append_log "$cmd $*"
     exit 0
     ;;
 esac

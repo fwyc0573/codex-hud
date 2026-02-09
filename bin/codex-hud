@@ -6,10 +6,13 @@
 # Environment variables:
 #   CODEX_HUD_POSITION - HUD pane position: bottom (default), top
 #   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 1/6 of terminal height, min 5)
-#   CODEX_HUD_HEIGHT_AUTO - Auto-adjust HUD height based on pane width (default: 1)
+#   CODEX_HUD_HEIGHT_AUTO - Auto-adjust HUD height based on pane width (default: 0)
 #   CODEX_HUD_HEIGHT_MIN - Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
 #   CODEX_HUD_HEIGHT_MAX - Maximum HUD height when auto-adjusting (default: 12)
-#   CODEX_HUD_NO_ATTACH - If set, don't attach to existing session
+#   CODEX_HUD_AUTO_ATTACH - If set to true, auto-attach to existing session
+#   CODEX_HUD_NO_ATTACH - Deprecated: if set to true, do not attach to existing session
+#   CODEX_HUD_ALTERNATE_SCREEN - Use alternate screen in codex pane (default: 0)
+#   CODEX_HUD_MOUSE - Enable tmux mouse mode for this session (default: 1)
 #   CODEX_HUD_CLEAR_SCROLLBACK - If set to 1, clears tmux scrollback on first render
 #
 
@@ -22,6 +25,8 @@ HUD_HEIGHT="${CODEX_HUD_HEIGHT:-}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 ALIAS_MARKER="# codex-hud alias"
 CODEX_CLI_PATH=""
+FORCE_ATTACH="0"
+FORCE_NEW_SESSION="0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -54,6 +59,68 @@ step() {
 # Check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+parse_boolean_setting() {
+    local name="$1"
+    local raw="$2"
+    local default_value="$3"
+
+    if [[ -z "$raw" ]]; then
+        echo "$default_value"
+        return 0
+    fi
+
+    local lowered
+    lowered=$(printf "%s" "$raw" | tr '[:upper:]' '[:lower:]')
+
+    case "$lowered" in
+        1|true|on|yes)
+            echo "1"
+            ;;
+        0|false|off|no)
+            echo "0"
+            ;;
+        *)
+            echo "Error: $name must be one of: 1, 0, true, false, on, off, yes, no (got: $raw)" >&2
+            return 1
+            ;;
+    esac
+}
+
+resolve_attach_policy() {
+    local auto_attach
+    local no_attach
+
+    auto_attach=$(parse_boolean_setting "CODEX_HUD_AUTO_ATTACH" "${CODEX_HUD_AUTO_ATTACH:-}" "0") || return 1
+    no_attach=$(parse_boolean_setting "CODEX_HUD_NO_ATTACH" "${CODEX_HUD_NO_ATTACH:-}" "0") || return 1
+
+    if [[ "$FORCE_NEW_SESSION" == "1" ]]; then
+        echo "new"
+        return 0
+    fi
+
+    if [[ "$FORCE_ATTACH" == "1" ]]; then
+        echo "attach"
+        return 0
+    fi
+
+    if [[ "$no_attach" == "1" ]]; then
+        warn "CODEX_HUD_NO_ATTACH is deprecated; use --new-session or unset CODEX_HUD_AUTO_ATTACH instead."
+        echo "new"
+        return 0
+    fi
+
+    if [[ "$auto_attach" == "1" ]]; then
+        echo "attach"
+        return 0
+    fi
+
+    echo "new"
+}
+
+resolve_alternate_screen_setting() {
+    parse_boolean_setting "CODEX_HUD_ALTERNATE_SCREEN" "${CODEX_HUD_ALTERNATE_SCREEN:-}" "0"
 }
 
 hash_cwd() {
@@ -255,7 +322,45 @@ get_cwd() {
 
 # Get the first pane ID in the session
 get_primary_pane_id() {
-    tmux list-panes -t "$SESSION_NAME" -F "#{pane_id}" 2>/dev/null | head -n1
+    local session_name="${1:-$SESSION_NAME}"
+    tmux list-panes -t "$session_name" -F "#{pane_id}" 2>/dev/null | head -n1
+}
+
+# Return 0 if a pane belongs to a session
+pane_exists_in_session() {
+    local session_name="$1"
+    local pane_id="$2"
+
+    if [[ -z "$session_name" || -z "$pane_id" ]]; then
+        return 1
+    fi
+
+    tmux list-panes -t "$session_name" -F "#{pane_id}" 2>/dev/null | grep -Fx "$pane_id" >/dev/null
+}
+
+# Get the main Codex pane ID for a session
+get_main_pane_id_for_session() {
+    local session_name="${1:-$SESSION_NAME}"
+    local stored_main
+    local hud_pane
+    local fallback_main
+
+    stored_main=$(tmux show-option -t "$session_name" -qv @codex_hud_main_pane)
+    if pane_exists_in_session "$session_name" "$stored_main"; then
+        echo "$stored_main"
+        return 0
+    fi
+
+    hud_pane=$(tmux show-option -t "$session_name" -qv @codex_hud_pane)
+    if [[ -n "$hud_pane" ]]; then
+        fallback_main=$(tmux list-panes -t "$session_name" -F "#{pane_id}" 2>/dev/null | grep -v "^${hud_pane}$" | head -n1 || true)
+        if [[ -n "$fallback_main" ]]; then
+            echo "$fallback_main"
+            return 0
+        fi
+    fi
+
+    get_primary_pane_id "$session_name"
 }
 
 # Find the most recent existing session for this directory
@@ -267,6 +372,7 @@ set_fixed_hud_height() {
     local session_name="$1"
     local hud_pane_id="$2"
     local height="$3"
+    local main_pane_id="${4:-}"
     local resize_helper="$SCRIPT_DIR/codex-hud-resize"
 
     if [[ -z "$session_name" || -z "$hud_pane_id" || -z "$height" ]]; then
@@ -282,7 +388,7 @@ set_fixed_hud_height() {
         auto_setting=$(tmux show-option -t "$session_name" -qv @codex_hud_auto)
     fi
     if [[ -z "$auto_setting" ]]; then
-        auto_setting="1"
+        auto_setting="0"
     fi
 
     min_setting="${CODEX_HUD_HEIGHT_MIN:-}"
@@ -301,12 +407,19 @@ set_fixed_hud_height() {
         max_setting="12"
     fi
 
+    local focus_main_setting
+    focus_main_setting="1"
+
     tmux set-option -t "$session_name" -q @codex_hud_pane "$hud_pane_id"
     tmux set-option -t "$session_name" -q @codex_hud_auto "$auto_setting"
     tmux set-option -t "$session_name" -q @codex_hud_height_min "$min_setting"
     tmux set-option -t "$session_name" -q @codex_hud_height_max "$max_setting"
     tmux set-option -t "$session_name" -q @codex_hud_base_height "$height"
     tmux set-option -t "$session_name" -q @codex_hud_height "$height"
+    tmux set-option -t "$session_name" -q @codex_hud_focus_main "$focus_main_setting"
+    if [[ -n "$main_pane_id" ]]; then
+        tmux set-option -t "$session_name" -q @codex_hud_main_pane "$main_pane_id"
+    fi
 
     if [[ -x "$resize_helper" ]]; then
         "$resize_helper" "$session_name"
@@ -324,10 +437,12 @@ set_fixed_hud_height() {
 
 # Check if session already exists and is usable
 check_existing_session() {
-    if [[ -n "${CODEX_HUD_NO_ATTACH:-}" ]]; then
+    local attach_policy
+    attach_policy=$(resolve_attach_policy) || exit 1
+    if [[ "$attach_policy" != "attach" ]]; then
         return 1
     fi
-    
+
     local existing
     existing=$(find_existing_session)
     if [[ -n "$existing" ]]; then
@@ -409,13 +524,29 @@ create_session() {
     
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
-    # Optimize tmux mouse + scroll behavior for smoother trackpad scrolling
-    tmux set-option -t "$SESSION_NAME" mouse on
+    # Keep wheel scrolling available in Codex pane by default.
+    local mouse_setting
+    mouse_setting=$(parse_boolean_setting "CODEX_HUD_MOUSE" "${CODEX_HUD_MOUSE:-}" "1") || exit 1
+
+    if [[ "$mouse_setting" == "1" ]]; then
+        tmux set-option -t "$SESSION_NAME" mouse on
+        tmux set-option -t "$SESSION_NAME" wheel-scroll-lines 1 2>/dev/null || true
+    else
+        tmux set-option -t "$SESSION_NAME" mouse off
+    fi
+
     tmux set-option -t "$SESSION_NAME" escape-time 0
     tmux set-option -t "$SESSION_NAME" assume-paste-time 0
     tmux set-option -t "$SESSION_NAME" repeat-time 0
     tmux set-option -t "$SESSION_NAME" history-limit 200000
-    tmux set-option -t "$SESSION_NAME" wheel-scroll-lines 1 2>/dev/null || true
+
+    local alternate_screen
+    alternate_screen=$(resolve_alternate_screen_setting) || exit 1
+    if [[ "$alternate_screen" == "1" ]]; then
+        tmux set-window-option -t "$SESSION_NAME" alternate-screen on
+    else
+        tmux set-window-option -t "$SESSION_NAME" alternate-screen off
+    fi
     local main_pane_id
     main_pane_id=$(get_primary_pane_id)
     if [[ -z "$main_pane_id" ]]; then
@@ -446,7 +577,7 @@ create_session() {
     fi
 
     if [[ -n "${hud_pane_id:-}" ]]; then
-        set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT"
+        set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT" "$main_pane_id"
     fi
 
     # Bind toggle key (Prefix + H) to switch HUD modes for this session
@@ -457,9 +588,29 @@ create_session() {
 
 # Main function
 main() {
-    # Parse arguments
-    local codex_args=("$@")
-    
+    local codex_args=()
+
+    # Parse wrapper arguments and pass the rest to codex CLI.
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --attach)
+                FORCE_ATTACH="1"
+                ;;
+            --new-session)
+                FORCE_NEW_SESSION="1"
+                ;;
+            --)
+                shift
+                codex_args+=("$@")
+                break
+                ;;
+            *)
+                codex_args+=("$1")
+                ;;
+        esac
+        shift
+    done
+
     # Check dependencies
     check_dependencies
     
@@ -474,14 +625,14 @@ main() {
     if check_existing_session; then
         info "Attaching to existing session: $SESSION_NAME"
         local main_pane_id
-        main_pane_id=$(get_primary_pane_id)
+        main_pane_id=$(get_main_pane_id_for_session "$SESSION_NAME")
         if [[ -n "$main_pane_id" ]]; then
             tmux select-pane -t "$main_pane_id" 2>/dev/null || true
         fi
         local hud_pane_id
         hud_pane_id=$(tmux show-option -t "$SESSION_NAME" -qv @codex_hud_pane)
         if [[ -n "$hud_pane_id" ]]; then
-            set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT"
+            set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT" "$main_pane_id"
         fi
         tmux attach-session -t "$SESSION_NAME"
         return 0
@@ -496,7 +647,7 @@ main() {
     
     # Attach to the session
     local main_pane_id
-    main_pane_id=$(get_primary_pane_id)
+    main_pane_id=$(get_main_pane_id_for_session "$SESSION_NAME")
     if [[ -n "$main_pane_id" ]]; then
         tmux select-pane -t "$main_pane_id" 2>/dev/null || true
     fi
@@ -520,15 +671,20 @@ Options:
   --self-check        Run environment diagnostics
   --kill              Kill existing session for current directory
   --list              List all codex-hud sessions
+  --attach            Attach to latest existing session in this directory
+  --new-session       Always create a new session for this launch
 
 Environment Variables:
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
   CODEX_HUD_HEIGHT    HUD pane height in lines (default: 1/6 of terminal height, min 5)
-  CODEX_HUD_HEIGHT_AUTO Auto-adjust HUD height based on pane width (default: 1)
+  CODEX_HUD_HEIGHT_AUTO Auto-adjust HUD height based on pane width (default: 0)
   CODEX_HUD_HEIGHT_MIN Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
   CODEX_HUD_HEIGHT_MAX Maximum HUD height when auto-adjusting (default: 12)
+  CODEX_HUD_AUTO_ATTACH Auto-attach to latest existing session (default: 0)
+  CODEX_HUD_NO_ATTACH Deprecated: force new session (overrides auto attach)
+  CODEX_HUD_ALTERNATE_SCREEN Use alternate screen in codex pane (default: 0)
+  CODEX_HUD_MOUSE Enable tmux mouse mode for this session (default: 1)
   CODEX_HUD_CLEAR_SCROLLBACK Clear terminal scrollback on first render (default: 0)
-  CODEX_HUD_NO_ATTACH If set, always create new session
 
 Requirements:
   - tmux (auto-installed if missing)
@@ -540,6 +696,8 @@ Examples:
   codex-hud --model gpt-5      Start with specific model
   codex-hud "help me debug"    Start with initial prompt
   codex-hud --kill             Kill existing session
+  codex-hud --attach            Reuse existing session intentionally
+  codex-hud --new-session       Force a new session
   CODEX_HUD_POSITION=top codex-hud  HUD on top
 
 For more information, see: https://github.com/openai/codex

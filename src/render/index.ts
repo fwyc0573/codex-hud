@@ -237,7 +237,7 @@ export function renderToStdout(data: HudData): void {
   lastStdoutFrame = frame;
 
   // Clear once on first render so the top line reliably appears in new panes.
-  const clearPrefix = (clearScrollback ? CLEAR_SCROLLBACK : '') + (isFirstRender ? CLEAR_SCREEN : '') + CURSOR_HOME;
+  const clearPrefix = (isFirstRender && clearScrollback ? CLEAR_SCROLLBACK : '') + (isFirstRender ? CLEAR_SCREEN : '') + CURSOR_HOME;
   process.stdout.write(clearPrefix);
 
   const totalLines = Math.max(lines.length, maxLines);

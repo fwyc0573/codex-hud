@@ -5,6 +5,13 @@
 
 # Codex HUD
 
+## Modification History
+
+| Date       | Summary of Changes                          |
+|------------|---------------------------------------------|
+| 2026-02-09 | 修复 resize 后主 pane 焦点漂移并调整鼠标滚动默认行为 |
+| 2026-02-09 | 更新会话复用默认策略与滚动相关配置文档 |
+
 ![Codex HUD](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
 
 OpenAI Codex CLI 的实时状态栏 HUD。
@@ -188,21 +195,34 @@ codex-hud --list
 # 显示帮助
 codex-hud --help
 
-# Run environment diagnostics
+# 有意复用当前目录已有会话
+codex-hud --attach
+
+# 本次启动强制创建新会话
+codex-hud --new-session
+
+# 运行环境诊断
 codex-hud --self-check
 ```
 
 ### Codex CLI 面板滚动体验
 
-codex-hud 会为每个 tmux 会话启用鼠标模式，以让触控板滚动在 Codex CLI 面板中更平滑、可控。
+codex-hud 默认启用 tmux 鼠标模式，确保触控板/鼠标滚轮可以直接在 Codex pane 中滚动。窗口 resize 的 hook 还会重新选中主 Codex pane，保持输入焦点稳定。同时默认将 `alternate-screen` 设为 `off` 以便历史输出可持续回看；若你不希望启用鼠标模式，可设置 `CODEX_HUD_MOUSE=0`。
 
 ### 环境变量
 
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
 | `CODEX_HUD_POSITION` | HUD 面板位置：`bottom`、`top` | `bottom` |
-| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | 终端高度的 1/6（最小 3） |
-| `CODEX_HUD_NO_ATTACH` | 如果设置，总是创建新会话 | （未设置） |
+| `CODEX_HUD_HEIGHT` | HUD 面板高度（行数） | 终端高度的 1/6（最小 5） |
+| `CODEX_HUD_HEIGHT_AUTO` | 根据 pane 宽度自动调整 HUD 高度 | `0` |
+| `CODEX_HUD_HEIGHT_MIN` | 自动模式下的最小高度 | `CODEX_HUD_HEIGHT` |
+| `CODEX_HUD_HEIGHT_MAX` | 自动模式下的最大高度 | `12` |
+| `CODEX_HUD_AUTO_ATTACH` | 自动复用同目录最新会话 | `0` |
+| `CODEX_HUD_NO_ATTACH` | 已弃用：强制新建会话（覆盖自动复用） | （未设置） |
+| `CODEX_HUD_ALTERNATE_SCREEN` | 设置 codex pane 的 tmux `alternate-screen`（`0`/`1`） | `0` |
+| `CODEX_HUD_MOUSE` | 启用 tmux 鼠标模式以支持滚轮/触控板滚动（`0`/`1`） | `1` |
+| `CODEX_HUD_CLEAR_SCROLLBACK` | HUD 首次渲染时清理 tmux scrollback | `0` |
 | `CODEX_HUD_CWD` | 覆盖 HUD 使用的工作目录（用于上下文/会话匹配） | （未设置；由 wrapper 设置） |
 
 ### 路径覆盖
@@ -221,7 +241,7 @@ CODEX_HUD_POSITION=top codex
 CODEX_HUD_HEIGHT=5 codex
 ```
 
-Note: HUD height is clamped to the available terminal size.
+注意：HUD 高度会被限制在当前终端可用高度范围内。
 
 ## 显示格式
 

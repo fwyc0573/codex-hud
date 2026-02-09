@@ -19,6 +19,43 @@ is_positive_int() {
     [[ "$1" =~ ^[0-9]+$ ]] && [[ "$1" -gt 0 ]]
 }
 
+parse_boolean_setting() {
+    local name="$1"
+    local raw="$2"
+    local default_value="$3"
+
+    if [[ -z "$raw" ]]; then
+        echo "$default_value"
+        return 0
+    fi
+
+    local lowered
+    lowered=$(printf "%s" "$raw" | tr '[:upper:]' '[:lower:]')
+
+    case "$lowered" in
+        1|true|on|yes)
+            echo "1"
+            ;;
+        0|false|off|no)
+            echo "0"
+            ;;
+        *)
+            echo "Error: $name must be one of: 1, 0, true, false, on, off, yes, no (got: $raw)" >&2
+            return 1
+            ;;
+    esac
+}
+
+pane_exists_in_session() {
+    local pane_id="$1"
+
+    if [[ -z "$pane_id" ]]; then
+        return 1
+    fi
+
+    tmux list-panes -t "$session_name" -F "#{pane_id}" 2>/dev/null | grep -Fx "$pane_id" >/dev/null
+}
+
 if [[ -z "$pane" ]]; then
     exit 0
 fi
@@ -34,10 +71,14 @@ fi
 auto=$(tmux show-option -t "$session_name" -qv @codex_hud_auto)
 max_height=$(tmux show-option -t "$session_name" -qv @codex_hud_height_max)
 min_height=$(tmux show-option -t "$session_name" -qv @codex_hud_height_min)
+focus_main=$(tmux show-option -t "$session_name" -qv @codex_hud_focus_main)
+stored_main_pane=$(tmux show-option -t "$session_name" -qv @codex_hud_main_pane)
 
 if [[ -z "$auto" ]]; then
-    auto="${CODEX_HUD_HEIGHT_AUTO:-1}"
+    auto="${CODEX_HUD_HEIGHT_AUTO:-}"
 fi
+auto=$(parse_boolean_setting "CODEX_HUD_HEIGHT_AUTO" "$auto" "0") || exit 1
+focus_main=$(parse_boolean_setting "@codex_hud_focus_main" "$focus_main" "1") || exit 1
 if [[ -z "$max_height" ]]; then
     max_height="${CODEX_HUD_HEIGHT_MAX:-12}"
 fi
@@ -75,9 +116,28 @@ if [[ "$auto" != "0" ]]; then
     fi
 fi
 
+main_pane=""
+if pane_exists_in_session "$stored_main_pane"; then
+    main_pane="$stored_main_pane"
+fi
+if [[ -z "$main_pane" ]]; then
+    main_pane=$(tmux list-panes -t "$session_name" -F "#{pane_id}" 2>/dev/null | grep -v "^${pane}$" | head -n1 || true)
+fi
+
+if [[ -n "$main_pane" ]]; then
+    main_pane_in_mode=$(tmux display -p -t "$main_pane" "#{pane_in_mode}" 2>/dev/null || true)
+    if [[ "$main_pane_in_mode" == "1" ]]; then
+        exit 0
+    fi
+fi
+
 tmux set-option -t "$session_name" -q @codex_hud_height "$target"
 
 current=$(tmux display -p -t "$pane" "#{pane_height}" 2>/dev/null || true)
 if [[ -n "$current" && "$current" != "$target" ]]; then
     tmux resize-pane -t "$pane" -y "$target" 2>/dev/null || true
+fi
+
+if [[ "$focus_main" == "1" && -n "$main_pane" ]]; then
+    tmux select-pane -t "$main_pane" 2>/dev/null || true
 fi

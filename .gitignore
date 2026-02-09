@@ -28,6 +28,8 @@ temp/
 
 # Task memory (local development)
 .task_memory/
+task_memory/
+
 
 # Test artifacts
 .git-test/

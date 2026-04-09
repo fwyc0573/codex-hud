@@ -32,6 +32,7 @@ export function readCodexConfig(): CodexConfig {
     
     return {
       model: parsed.model as string | undefined,
+      model_reasoning_effort: parsed.model_reasoning_effort as string | undefined,
       model_provider: parsed.model_provider as string | undefined,
       approval_policy: parsed.approval_policy as string | undefined,
       sandbox_mode: parsed.sandbox_mode as string | undefined,

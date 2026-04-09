@@ -19,6 +19,9 @@ export interface SessionFile {
 
 export { getCodexHome, getSessionsDir };
 
+const SHELL_SNAPSHOTS_SUBDIR = 'shell_snapshots';
+const ARCHIVED_SESSIONS_SUBDIR = 'archived_sessions';
+
 function normalizePath(input?: string | null): string | null {
   if (!input) {
     return null;
@@ -321,6 +324,148 @@ export function findRolloutBySessionId(
   return null;
 }
 
+function parseSnapshotFilename(filename: string): { threadId: string; nonce: bigint } | null {
+  const match = filename.match(/^([a-f0-9-]+)\.(\d+)\.[^.]+$/);
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return {
+      threadId: match[1],
+      nonce: BigInt(match[2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readSnapshotPane(filePath: string): string | null {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const match = content.match(
+      /(?:^|\n)(?:export\s+)?TMUX_PANE=(?:'([^']*)'|"([^"]*)"|([^\n]+))/
+    );
+    const pane = match?.[1] ?? match?.[2] ?? match?.[3];
+    return pane ? pane.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function findThreadIdForPane(mainPaneId: string): string | null {
+  const snapshotsDir = path.join(getCodexHome(), SHELL_SNAPSHOTS_SUBDIR);
+  if (!fs.existsSync(snapshotsDir)) {
+    return null;
+  }
+
+  const matches: Array<{ threadId: string; nonce: bigint; path: string }> = [];
+
+  try {
+    const files = fs.readdirSync(snapshotsDir);
+    for (const file of files) {
+      const parsed = parseSnapshotFilename(file);
+      if (!parsed) {
+        continue;
+      }
+
+      const filePath = path.join(snapshotsDir, file);
+      if (readSnapshotPane(filePath) !== mainPaneId) {
+        continue;
+      }
+
+      matches.push({
+        threadId: parsed.threadId,
+        nonce: parsed.nonce,
+        path: filePath,
+      });
+    }
+  } catch {
+    return null;
+  }
+
+  matches.sort((a, b) => {
+    if (a.nonce === b.nonce) {
+      return b.path.localeCompare(a.path);
+    }
+    return a.nonce > b.nonce ? -1 : 1;
+  });
+
+  return matches[0]?.threadId ?? null;
+}
+
+function findRolloutPathBySessionIdInRoot(rootDir: string, sessionId: string): string | null {
+  if (!fs.existsSync(rootDir)) {
+    return null;
+  }
+
+  const expectedSuffix = `-${sessionId}.jsonl`;
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    if (!currentDir) {
+      continue;
+    }
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+
+      if (
+        entry.isFile() &&
+        entry.name.startsWith('rollout-') &&
+        entry.name.endsWith(expectedSuffix)
+      ) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildSessionFile(filePath: string): SessionFile | null {
+  const parsed = parseRolloutFilename(path.basename(filePath));
+  if (!parsed) {
+    return null;
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+    return {
+      path: filePath,
+      sessionId: parsed.sessionId,
+      timestamp: parsed.timestamp,
+      size: stats.size,
+      modifiedAt: stats.mtime,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function findSessionByThreadId(sessionId: string): SessionFile | null {
+  const codexHome = getCodexHome();
+  const activePath = findRolloutPathBySessionIdInRoot(path.join(codexHome, 'sessions'), sessionId);
+  const archivedPath = findRolloutPathBySessionIdInRoot(
+    path.join(codexHome, ARCHIVED_SESSIONS_SUBDIR),
+    sessionId
+  );
+
+  return buildSessionFile(activePath ?? archivedPath ?? '');
+}
+
 /**
  * Watch for the most recently modified rollout file
  * Returns the path to the file that should be monitored
@@ -329,15 +474,14 @@ export class SessionFinder {
   private currentSession: SessionFile | null = null;
   private checkInterval: NodeJS.Timeout | null = null;
   private targetCwd: string | null = null;
-  private targetStartTime: Date | null = null;
+  private currentThreadId: string | null = null;
 
   constructor(
     targetCwd?: string,
     private onSessionChange?: (session: SessionFile | null) => void,
-    targetStartTime?: Date | null
+    _targetStartTime?: Date | null
   ) {
     this.targetCwd = targetCwd || null;
-    this.targetStartTime = targetStartTime ?? null;
   }
 
   /**
@@ -362,51 +506,61 @@ export class SessionFinder {
    * Check for active or recent sessions
    */
   check(): SessionFile | null {
-    const current = this.currentSession;
-    const currentExists = current ? fs.existsSync(current.path) : false;
+    const mainPaneId = process.env.CODEX_HUD_MAIN_PANE;
+    if (!mainPaneId) {
+      if (this.currentSession || this.currentThreadId) {
+        this.currentSession = null;
+        this.currentThreadId = null;
+        this.onSessionChange?.(null);
+      }
+      return null;
+    }
 
-    if (current && currentExists) {
+    const threadId = findThreadIdForPane(mainPaneId);
+    if (!threadId) {
+      if (this.currentSession || this.currentThreadId) {
+        this.currentSession = null;
+        this.currentThreadId = null;
+        this.onSessionChange?.(null);
+      }
+      return null;
+    }
+
+    if (
+      this.currentSession &&
+      this.currentSession.sessionId === threadId &&
+      fs.existsSync(this.currentSession.path)
+    ) {
       try {
-        const stats = fs.statSync(current.path);
-        current.modifiedAt = stats.mtime;
-        current.size = stats.size;
+        const stats = fs.statSync(this.currentSession.path);
+        this.currentSession.modifiedAt = stats.mtime;
+        this.currentSession.size = stats.size;
       } catch {
         // ignore stat errors
       }
-    } else if (current && !currentExists) {
-      this.currentSession = null;
-      this.onSessionChange?.(null);
+      this.currentThreadId = threadId;
+      return this.currentSession;
     }
 
-    let next: SessionFile | null = null;
-    if (this.targetStartTime) {
-      // When a target start time is known, prefer the closest session by timestamp
-      next = this.findBestRecentSession();
-    }
+    this.currentThreadId = threadId;
+    const next = findSessionByThreadId(threadId);
 
     if (!next) {
-      // Prefer an active session if available
-      const active = findActiveRollouts(60, this.targetCwd || undefined, DEFAULT_LOOKBACK_DAYS);
-      next = this.selectBestSession(active);
-    }
-
-    if (!next) {
-      next = this.findBestRecentSession();
-    }
-
-    if (next) {
-      if (!this.currentSession || this.currentSession.path !== next.path) {
-        this.currentSession = next;
-        this.onSessionChange?.(next);
+      if (this.currentSession) {
+        this.currentSession = null;
+        this.onSessionChange?.(null);
       }
-      return this.currentSession;
+      return null;
     }
 
-    if (this.currentSession && currentExists) {
-      return this.currentSession;
+    if (!this.currentSession || this.currentSession.path !== next.path) {
+      this.currentSession = next;
+      this.onSessionChange?.(next);
+      return next;
     }
 
-    return null;
+    this.currentSession = next;
+    return this.currentSession;
   }
 
   /**
@@ -414,51 +568,5 @@ export class SessionFinder {
    */
   getCurrentSession(): SessionFile | null {
     return this.currentSession;
-  }
-
-  private findBestRecentSession(): SessionFile | null {
-    if (!this.targetStartTime) {
-      return findMostRecentRollout(DEFAULT_LOOKBACK_DAYS, this.targetCwd || undefined);
-    }
-
-    let rollouts = findRolloutsInDays(DEFAULT_LOOKBACK_DAYS);
-    if (this.targetCwd) {
-      rollouts = rollouts.filter((r) => peekRolloutCwd(r.path) === this.targetCwd);
-    }
-
-    return this.selectBestSession(rollouts);
-  }
-
-  private selectBestSession(sessions: SessionFile[]): SessionFile | null {
-    if (sessions.length === 0) {
-      return null;
-    }
-
-    if (!this.targetStartTime) {
-      const sorted = sessions.sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
-      return sorted[0] ?? null;
-    }
-
-    const targetMs = this.targetStartTime.getTime();
-    const toleranceMs = 10 * 60 * 1000; // 10 minutes
-
-    let candidates = sessions.filter(
-      (s) => Math.abs(s.timestamp.getTime() - targetMs) <= toleranceMs
-    );
-
-    if (candidates.length === 0) {
-      candidates = sessions;
-    }
-
-    candidates.sort((a, b) => {
-      const aDelta = Math.abs(a.timestamp.getTime() - targetMs);
-      const bDelta = Math.abs(b.timestamp.getTime() - targetMs);
-      if (aDelta !== bDelta) {
-        return aDelta - bDelta;
-      }
-      return b.modifiedAt.getTime() - a.modifiedAt.getTime();
-    });
-
-    return candidates[0] ?? null;
   }
 }

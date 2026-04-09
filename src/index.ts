@@ -127,7 +127,11 @@ const sessionFinder = new SessionFinder(HUD_CWD_REAL, (session) => {
   if (session) {
     rolloutParser.setRolloutPath(session.path);
     hudFileWatcher.setRolloutPath(session.path);
+    return;
   }
+
+  rolloutParser.setRolloutPath(null);
+  hudFileWatcher.setRolloutPath(null);
 }, HUD_SESSION_START);
 
 const rolloutParser = new RolloutParser(10);
@@ -309,8 +313,10 @@ async function main(): Promise<void> {
   });
 
   hudFileWatcher.onRolloutChange(async () => {
-    // Re-parse rollout when file changes
-    await parseRolloutSafely();
+    const session = sessionFinder.check();
+    if (session) {
+      await parseRolloutSafely();
+    }
   });
 
   hudFileWatcher.start();

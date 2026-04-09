@@ -26,6 +26,19 @@ info() { echo -e "${GREEN}✓${NC} $1"; }
 step() { echo -e "${BLUE}==>${NC} $1"; }
 header() { echo -e "\n${BOLD}${CYAN}$1${NC}\n"; }
 
+show_help() {
+    cat << EOF
+Codex HUD uninstaller
+
+Usage:
+  ./uninstall.sh        Remove codex-hud aliases and stop HUD sessions
+  ./uninstall.sh --help Show this help message
+
+Quick command wrapper:
+  ./bin/codex-hud-uninstall
+EOF
+}
+
 # Detect user's shell
 detect_shell() {
     local shell_name
@@ -231,6 +244,13 @@ main() {
     echo "To completely remove codex-hud, you can delete this directory:"
     echo "  ${YELLOW}rm -rf $SCRIPT_DIR${NC}"
 }
+
+case "${1:-}" in
+    --help|-h)
+        show_help
+        exit 0
+        ;;
+esac
 
 # Run main
 main "$@"

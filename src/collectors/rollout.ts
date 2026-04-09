@@ -10,6 +10,7 @@ import type {
   ResponseItemPayload,
   EventMsgPayload,
   SessionMetaPayload,
+  TurnContextPayload,
   ToolCall,
   ToolActivity,
   PlanProgress,
@@ -100,6 +101,8 @@ export async function parseRolloutFile(
   };
 
   let session: SessionInfo | null = null;
+  let sessionModel: string | undefined;
+  let sessionReasoningEffort: string | undefined;
   let planProgress: PlanProgress | null = null;
   let tokenUsage: TokenUsageInfo | null = null;
   let compactCount = 0;
@@ -190,6 +193,8 @@ export async function parseRolloutFile(
             startTime: new Date(meta.timestamp),
             cwd: meta.cwd,
             cliVersion: meta.cli_version,
+            model: sessionModel,
+            reasoningEffort: sessionReasoningEffort,
             modelProvider: meta.model_provider,
             git: meta.git
               ? {
@@ -198,6 +203,25 @@ export async function parseRolloutFile(
                 }
               : undefined,
           };
+        } else if (entry.type === 'turn_context') {
+          const payload = entry.payload as TurnContextPayload;
+          const contextModel = payload.model ?? payload.collaboration_mode?.settings?.model;
+          const reasoningEffort =
+            payload.reasoning_effort ?? payload.collaboration_mode?.settings?.reasoning_effort;
+
+          if (contextModel) {
+            sessionModel = contextModel;
+            if (session) {
+              session.model = contextModel;
+            }
+          }
+
+          if (reasoningEffort) {
+            sessionReasoningEffort = reasoningEffort;
+            if (session) {
+              session.reasoningEffort = reasoningEffort;
+            }
+          }
         } else if (entry.type === 'response_item') {
           const payload = entry.payload as ResponseItemPayload;
 
@@ -317,12 +341,15 @@ export class RolloutParser {
   /**
    * Set the rollout file to parse
    */
-  setRolloutPath(path: string): void {
-    if (this.rolloutPath !== path) {
-      this.rolloutPath = path;
-      this.lastOffset = 0;
-      this.cachedResult = null;
+  setRolloutPath(path: string | null): void {
+    if (this.rolloutPath === path) {
+      return;
     }
+
+    this.rolloutPath = path;
+    this.lastOffset = 0;
+    this.cachedResult = null;
+    this.runningCalls = new Map();
   }
 
   /**

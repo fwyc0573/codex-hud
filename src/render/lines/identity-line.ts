@@ -54,7 +54,10 @@ export function renderIdentityLine(
   const parts: string[] = [];
   
   // Model name in brackets
-  const modelName = getModelDisplayName(data.config);
+  const modelName = data.session?.model ?? getModelDisplayName(data.config);
+  const reasoningEffort = data.session?.reasoningEffort ?? data.config.model_reasoning_effort;
+  const showReasoningEffort = Boolean((data.session?.model ?? data.config.model) && reasoningEffort);
+  const identityName = showReasoningEffort ? `${modelName} ${reasoningEffort}` : modelName;
   let contextDisplay = '';
 
   // Context usage bar (if available)
@@ -88,7 +91,7 @@ export function renderIdentityLine(
   }
 
   const maxWidth = options.maxWidth;
-  let modelDisplay = theme.modelBracket('[') + theme.model(modelName) + theme.modelBracket(']');
+  let modelDisplay = theme.modelBracket('[') + theme.model(identityName) + theme.modelBracket(']');
   if (maxWidth && maxWidth > 0) {
     const contextLen = contextDisplay ? visualLength(contextDisplay) + 1 : 0;
     const availableForModel = Math.max(0, maxWidth - contextLen);
@@ -97,7 +100,7 @@ export function renderIdentityLine(
     }
     if (availableForModel > 2) {
       const maxModelLen = Math.max(1, availableForModel - 2);
-      const trimmedModel = truncate(modelName, maxModelLen, '…');
+      const trimmedModel = truncate(identityName, maxModelLen, '…');
       modelDisplay = theme.modelBracket('[') + theme.model(trimmedModel) + theme.modelBracket(']');
     }
   }

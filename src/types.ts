@@ -19,6 +19,7 @@ export const BASELINE_TOKENS = 12000;
 
 export interface CodexConfig {
   model?: string;
+  model_reasoning_effort?: string;
   model_provider?: string;
   approval_policy?: string;
   sandbox_mode?: string;
@@ -126,11 +127,15 @@ export interface LayoutConfig {
 
 export interface RolloutLine {
   timestamp: string;
-  type: 'session_meta' | 'response_item' | 'event_msg';
+  type: 'session_meta' | 'response_item' | 'event_msg' | 'turn_context';
   payload: RolloutPayload;
 }
 
-export type RolloutPayload = SessionMetaPayload | ResponseItemPayload | EventMsgPayload;
+export type RolloutPayload =
+  | SessionMetaPayload
+  | ResponseItemPayload
+  | EventMsgPayload
+  | TurnContextPayload;
 
 export interface SessionMetaPayload {
   id: string;
@@ -181,6 +186,17 @@ export interface EventMsgPayload {
   summary?: string;
   // For turn_started events
   model_context_window?: number;
+}
+
+export interface TurnContextPayload {
+  model?: string;
+  reasoning_effort?: string;
+  collaboration_mode?: {
+    settings?: {
+      model?: string;
+      reasoning_effort?: string;
+    };
+  };
 }
 
 /**
@@ -294,6 +310,8 @@ export interface SessionInfo {
   startTime: Date;
   cwd: string;
   cliVersion: string;
+  model?: string;
+  reasoningEffort?: string;
   modelProvider?: string;
   git?: {
     branch?: string;

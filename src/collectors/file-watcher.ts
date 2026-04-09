@@ -112,11 +112,20 @@ export function createSessionWatcher(): FileWatcher {
 }
 
 /**
+ * Create a watcher for shell snapshots.
+ */
+export function createShellSnapshotWatcher(): FileWatcher {
+  const snapshotsDir = path.join(getCodexHome(), 'shell_snapshots', '*.sh');
+  return new FileWatcher([snapshotsDir], { usePolling: true });
+}
+
+/**
  * Unified watcher manager for all HUD-related file monitoring
  */
 export class HudFileWatcher {
   private configWatcher: FileWatcher;
   private sessionWatcher: FileWatcher | null = null;
+  private shellSnapshotWatcher: FileWatcher | null = null;
   private rolloutWatcher: FileWatcher | null = null;
   private currentRolloutPath: string | null = null;
 
@@ -144,13 +153,14 @@ export class HudFileWatcher {
   async stop(): Promise<void> {
     await this.configWatcher.stop();
     await this.sessionWatcher?.stop();
+    await this.shellSnapshotWatcher?.stop();
     await this.rolloutWatcher?.stop();
   }
 
   /**
    * Set the specific rollout file to watch
    */
-  setRolloutPath(rolloutPath: string): void {
+  setRolloutPath(rolloutPath: string | null): void {
     if (this.currentRolloutPath === rolloutPath) {
       return;
     }
@@ -162,6 +172,10 @@ export class HudFileWatcher {
     }
 
     this.currentRolloutPath = rolloutPath;
+
+    if (!rolloutPath) {
+      return;
+    }
 
     // Create new watcher for this specific file
     this.rolloutWatcher = new FileWatcher([rolloutPath], { usePolling: true });
@@ -195,6 +209,12 @@ export class HudFileWatcher {
       }
     });
     this.sessionWatcher.start();
+
+    this.shellSnapshotWatcher = createShellSnapshotWatcher();
+    this.shellSnapshotWatcher.onChange((filePath) => {
+      this.notifyRolloutChange(filePath);
+    });
+    this.shellSnapshotWatcher.start();
   }
 
   private notifyConfigChange(): void {

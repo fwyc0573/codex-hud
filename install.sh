@@ -17,9 +17,14 @@ NC=$'\033[0m'
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER_PATH="$SCRIPT_DIR/bin/codex-hud"
+INSTALL_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-install"
+SYNC_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-sync"
+UPGRADE_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-upgrade"
+UNINSTALL_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-uninstall"
 BACKUP_FILE="$HOME/.codex-hud-backup-aliases"
 MARKER="# codex-hud alias"
 SOURCE_MARKER="# codex-hud: load bashrc"
+MODE="install"
 
 # Print functions
 error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
@@ -31,6 +36,24 @@ header() { echo -e "\n${BOLD}${CYAN}$1${NC}\n"; }
 # Check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+show_help() {
+    cat << EOF
+Codex HUD installer / sync / upgrade utility
+
+Usage:
+  ./install.sh              Install or refresh codex-hud in the current checkout
+  ./install.sh --sync       Rebuild and refresh aliases for the current checkout
+  ./install.sh --upgrade    Pull latest git changes, then sync
+  ./install.sh --help       Show this help message
+
+Quick command wrappers:
+  ./bin/codex-hud-install
+  ./bin/codex-hud-sync
+  ./bin/codex-hud-upgrade
+  ./bin/codex-hud-uninstall
+EOF
 }
 
 # Detect OS for package manager
@@ -210,17 +233,22 @@ backup_existing_aliases() {
     fi
     
     local existing_aliases=""
-    local codex_alias
-    local resume_alias
-    codex_alias=$(grep "^alias codex=" "$rc_file" 2>/dev/null | grep -v "$MARKER" || true)
-    resume_alias=$(grep "^alias codex-resume=" "$rc_file" 2>/dev/null | grep -v "$MARKER" || true)
-    
-    if [[ -n "$codex_alias" ]]; then
-        existing_aliases+="$codex_alias"$'\n'
-    fi
-    if [[ -n "$resume_alias" ]]; then
-        existing_aliases+="$resume_alias"$'\n'
-    fi
+    local alias_names=(
+        "codex"
+        "codex-resume"
+        "codex-hud-install"
+        "codex-hud-sync"
+        "codex-hud-upgrade"
+        "codex-hud-uninstall"
+    )
+    local alias_name
+    local alias_line
+    for alias_name in "${alias_names[@]}"; do
+        alias_line=$(grep "^alias ${alias_name}[= ]" "$rc_file" 2>/dev/null | grep -v "$MARKER" || true)
+        if [[ -n "$alias_line" ]]; then
+            existing_aliases+="$alias_line"$'\n'
+        fi
+    done
     
     if [[ -n "$existing_aliases" ]]; then
         warn "Found existing codex alias entries in $rc_file"
@@ -229,9 +257,31 @@ backup_existing_aliases() {
         
         local temp_file
         temp_file=$(mktemp)
-        grep -v "^alias codex=" "$rc_file" | grep -v "^alias codex-resume=" > "$temp_file" || true
+        grep -Ev "^alias (codex|codex-resume|codex-hud-install|codex-hud-sync|codex-hud-upgrade|codex-hud-uninstall)[= ]" "$rc_file" > "$temp_file" || true
         mv "$temp_file" "$rc_file"
     fi
+}
+
+write_aliases() {
+    local rc_file="$1"
+    local shell_name="$2"
+
+    if [[ "$shell_name" == "fish" ]]; then
+        echo "alias codex '$WRAPPER_PATH'  $MARKER" >> "$rc_file"
+        echo "alias codex-resume '$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
+        echo "alias codex-hud-install '$INSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
+        echo "alias codex-hud-sync '$SYNC_CMD_PATH'  $MARKER" >> "$rc_file"
+        echo "alias codex-hud-upgrade '$UPGRADE_CMD_PATH'  $MARKER" >> "$rc_file"
+        echo "alias codex-hud-uninstall '$UNINSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
+        return 0
+    fi
+
+    echo "alias codex='$WRAPPER_PATH'  $MARKER" >> "$rc_file"
+    echo "alias codex-resume='$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
+    echo "alias codex-hud-install='$INSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
+    echo "alias codex-hud-sync='$SYNC_CMD_PATH'  $MARKER" >> "$rc_file"
+    echo "alias codex-hud-upgrade='$UPGRADE_CMD_PATH'  $MARKER" >> "$rc_file"
+    echo "alias codex-hud-uninstall='$UNINSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
 }
 
 # Add our alias to the RC file
@@ -244,29 +294,20 @@ add_alias() {
         touch "$rc_file"
     fi
     
-    # Check if our alias already exists
-    if grep -q "$MARKER" "$rc_file" 2>/dev/null; then
-        info "Alias already configured in $rc_file"
-        return 0
+    # Back up any user-owned aliases before we rewrite our managed block.
+    if ! grep -q "$MARKER" "$rc_file" 2>/dev/null; then
+        backup_existing_aliases "$rc_file"
     fi
-    
-    # Backup existing aliases
-    backup_existing_aliases "$rc_file"
-    
-    # Add our alias
+
+    local temp_file
+    temp_file=$(mktemp)
+    grep -v "$MARKER" "$rc_file" > "$temp_file" || true
+    mv "$temp_file" "$rc_file"
+
     echo "" >> "$rc_file"
-    
-    if [[ "$shell_name" == "fish" ]]; then
-        # Fish uses different alias syntax
-        echo "alias codex '$WRAPPER_PATH'  $MARKER" >> "$rc_file"
-        echo "alias codex-resume '$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
-    else
-        # Bash/Zsh syntax
-        echo "alias codex='$WRAPPER_PATH'  $MARKER" >> "$rc_file"
-        echo "alias codex-resume='$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
-    fi
-    
-    info "Added alias to $rc_file"
+    write_aliases "$rc_file" "$shell_name"
+
+    info "Configured aliases in $rc_file"
 }
 
 # Ensure bash login shells load ~/.bashrc
@@ -300,10 +341,27 @@ build_project() {
     info "Build complete"
 }
 
+upgrade_checkout() {
+    command_exists git || error "git is required for codex-hud upgrade."
+
+    (cd "$SCRIPT_DIR" && git rev-parse --is-inside-work-tree >/dev/null 2>&1) || error "Upgrade requires a git checkout: $SCRIPT_DIR"
+
+    local worktree_status
+    worktree_status=$(cd "$SCRIPT_DIR" && git status --short)
+    if [[ -n "$worktree_status" ]]; then
+        error "Upgrade requires a clean git worktree in $SCRIPT_DIR. Commit or stash local changes first."
+    fi
+
+    step "Pulling latest codex-hud changes..."
+    (cd "$SCRIPT_DIR" && git pull --ff-only) || error "Failed to pull latest codex-hud changes"
+    info "Repository updated"
+}
+
 # Make wrapper executable
 setup_wrapper() {
     step "Setting up wrapper script..."
     chmod +x "$WRAPPER_PATH"
+    chmod +x "$INSTALL_CMD_PATH" "$SYNC_CMD_PATH" "$UPGRADE_CMD_PATH" "$UNINSTALL_CMD_PATH"
     if [[ -f "$SCRIPT_DIR/bin/codex-hud-resize" ]]; then
         chmod +x "$SCRIPT_DIR/bin/codex-hud-resize"
     fi
@@ -312,7 +370,24 @@ setup_wrapper() {
 
 # Main installation
 main() {
-    header "Codex HUD Installer"
+    case "$MODE" in
+        install)
+            header "Codex HUD Installer"
+            ;;
+        sync)
+            header "Codex HUD Sync"
+            ;;
+        upgrade)
+            header "Codex HUD Upgrade"
+            ;;
+        *)
+            error "Unknown install mode: $MODE"
+            ;;
+    esac
+
+    if [[ "$MODE" == "upgrade" ]]; then
+        upgrade_checkout
+    fi
     
     # Check dependencies
     check_dependencies
@@ -347,7 +422,17 @@ main() {
     step "Configuring aliases in $zsh_rc..."
     add_alias "$zsh_rc" "zsh"
     
-    header "Installation Complete!"
+    case "$MODE" in
+        install)
+            header "Installation Complete!"
+            ;;
+        sync)
+            header "Sync Complete!"
+            ;;
+        upgrade)
+            header "Upgrade Complete!"
+            ;;
+    esac
     echo "To start using codex-hud, either:"
     echo ""
     echo "  1. Open a new terminal, or"
@@ -356,13 +441,37 @@ main() {
     echo ""
     echo "Then just type ${GREEN}codex${NC} to start Codex with the HUD!"
     echo "Or use ${GREEN}codex-resume${NC} to resume with the HUD wrapper."
+    echo "Management commands: ${GREEN}codex-hud-sync${NC}, ${GREEN}codex-hud-upgrade${NC}, ${GREEN}codex-hud-uninstall${NC}"
     echo ""
     echo "Configuration options:"
     echo "  ${CYAN}CODEX_HUD_POSITION=top${NC}    - Put HUD on top"
     echo "  ${CYAN}CODEX_HUD_HEIGHT=5${NC}       - Taller HUD pane"
     echo ""
-    echo "To uninstall: ${YELLOW}./uninstall.sh${NC}"
+    echo "To uninstall from the repo root: ${YELLOW}./bin/codex-hud-uninstall${NC}"
 }
+
+# Parse flags first
+case "${1:-}" in
+    --help|-h)
+        show_help
+        exit 0
+        ;;
+    --sync)
+        MODE="sync"
+        shift
+        ;;
+    --upgrade)
+        MODE="upgrade"
+        shift
+        ;;
+    --install|"")
+        MODE="install"
+        [[ "${1:-}" == "--install" ]] && shift
+        ;;
+    *)
+        error "Unknown option: $1"
+        ;;
+esac
 
 # Run main
 main "$@"

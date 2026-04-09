@@ -26,17 +26,17 @@ TESTS_FAILED=0
 # Test functions
 test_start() {
     echo -e "${BLUE}TEST:${NC} $1"
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
 }
 
 test_pass() {
     echo -e "  ${GREEN}✓ PASS${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 test_fail() {
     echo -e "  ${RED}✗ FAIL:${NC} $1"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
 # Cleanup test artifacts
@@ -74,6 +74,26 @@ test_files_exist() {
         test_fail "bin/codex-hud not found"
         return
     fi
+
+    if [[ ! -f "$PARENT_DIR/bin/codex-hud-install" ]]; then
+        test_fail "bin/codex-hud-install not found"
+        return
+    fi
+
+    if [[ ! -f "$PARENT_DIR/bin/codex-hud-sync" ]]; then
+        test_fail "bin/codex-hud-sync not found"
+        return
+    fi
+
+    if [[ ! -f "$PARENT_DIR/bin/codex-hud-upgrade" ]]; then
+        test_fail "bin/codex-hud-upgrade not found"
+        return
+    fi
+
+    if [[ ! -f "$PARENT_DIR/bin/codex-hud-uninstall" ]]; then
+        test_fail "bin/codex-hud-uninstall not found"
+        return
+    fi
     
     if [[ ! -x "$PARENT_DIR/install.sh" ]]; then
         test_fail "install.sh not executable"
@@ -82,6 +102,26 @@ test_files_exist() {
     
     if [[ ! -x "$PARENT_DIR/uninstall.sh" ]]; then
         test_fail "uninstall.sh not executable"
+        return
+    fi
+
+    if [[ ! -x "$PARENT_DIR/bin/codex-hud-install" ]]; then
+        test_fail "bin/codex-hud-install not executable"
+        return
+    fi
+
+    if [[ ! -x "$PARENT_DIR/bin/codex-hud-sync" ]]; then
+        test_fail "bin/codex-hud-sync not executable"
+        return
+    fi
+
+    if [[ ! -x "$PARENT_DIR/bin/codex-hud-upgrade" ]]; then
+        test_fail "bin/codex-hud-upgrade not executable"
+        return
+    fi
+
+    if [[ ! -x "$PARENT_DIR/bin/codex-hud-uninstall" ]]; then
+        test_fail "bin/codex-hud-uninstall not executable"
         return
     fi
     
@@ -104,6 +144,26 @@ test_bash_syntax() {
     
     if ! bash -n "$PARENT_DIR/bin/codex-hud" 2>/dev/null; then
         test_fail "bin/codex-hud has syntax errors"
+        return
+    fi
+
+    if ! bash -n "$PARENT_DIR/bin/codex-hud-install" 2>/dev/null; then
+        test_fail "bin/codex-hud-install has syntax errors"
+        return
+    fi
+
+    if ! bash -n "$PARENT_DIR/bin/codex-hud-sync" 2>/dev/null; then
+        test_fail "bin/codex-hud-sync has syntax errors"
+        return
+    fi
+
+    if ! bash -n "$PARENT_DIR/bin/codex-hud-upgrade" 2>/dev/null; then
+        test_fail "bin/codex-hud-upgrade has syntax errors"
+        return
+    fi
+
+    if ! bash -n "$PARENT_DIR/bin/codex-hud-uninstall" 2>/dev/null; then
+        test_fail "bin/codex-hud-uninstall has syntax errors"
         return
     fi
     

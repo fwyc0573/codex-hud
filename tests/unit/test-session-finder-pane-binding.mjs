@@ -60,7 +60,7 @@ function writeRollout(home, { sessionId, cwd, fileOffsetMinutes = 0, modifiedAt,
   return filePath;
 }
 
-function writeSnapshot(home, threadId, paneId, nonce) {
+function writeSnapshot(home, threadId, paneId, nonce, assignment = `export TMUX_PANE='${paneId}'`) {
   const dir = path.join(home, 'shell_snapshots');
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, `${threadId}.${nonce}.sh`);
@@ -68,13 +68,17 @@ function writeSnapshot(home, threadId, paneId, nonce) {
     filePath,
     [
       '# Snapshot file',
-      `export TMUX_PANE='${paneId}'`,
+      assignment,
       "export PATH='/usr/bin'",
       '',
     ].join('\n'),
     'utf8'
   );
   return filePath;
+}
+
+function assertSamePath(actual, expected, message) {
+  assert.equal(fs.realpathSync(actual), fs.realpathSync(expected), message);
 }
 
 const originalCodexHome = process.env.CODEX_HOME;
@@ -130,7 +134,7 @@ try {
     const finder = new SessionFinder(cwd);
     const resolved = finder.check();
     assert.ok(resolved, 'expected a pane-bound session to resolve');
-    assert.equal(
+    assertSamePath(
       resolved.path,
       boundRollout,
       'pane-bound shell snapshot should override the newest unrelated rollout'
@@ -165,13 +169,34 @@ try {
     const finderOne = new SessionFinder(cwd);
     const resultOne = finderOne.check();
     assert.ok(resultOne, 'expected pane one to resolve');
-    assert.equal(resultOne.path, paneOneRollout, 'pane one should stay on its own thread');
+    assertSamePath(resultOne.path, paneOneRollout, 'pane one should stay on its own thread');
 
     process.env.CODEX_HUD_MAIN_PANE = '%72';
     const finderTwo = new SessionFinder(cwd);
     const resultTwo = finderTwo.check();
     assert.ok(resultTwo, 'expected pane two to resolve');
-    assert.equal(resultTwo.path, paneTwoRollout, 'pane two should stay on its own thread');
+    assertSamePath(resultTwo.path, paneTwoRollout, 'pane two should stay on its own thread');
+  }
+
+  {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const thread = '019d7291-a135-7fe1-b46f-8f3eca4fa451';
+    const rollout = writeRollout(home, {
+      sessionId: thread,
+      cwd,
+      modifiedAt: new Date(),
+    });
+    writeSnapshot(home, thread, '%70', 1775743876858615370n, 'declare -x TMUX_PANE="%70"');
+
+    const finder = new SessionFinder(cwd);
+    const result = finder.check();
+    assert.ok(result, 'expected declare -x TMUX_PANE snapshots to resolve');
+    assertSamePath(result.path, rollout, 'declare -x snapshot should bind the HUD to its rollout');
   }
 } finally {
   if (originalCodexHome === undefined) {

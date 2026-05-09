@@ -344,7 +344,7 @@ function readSnapshotPane(filePath: string): string | null {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
     const match = content.match(
-      /(?:^|\n)(?:export\s+)?TMUX_PANE=(?:'([^']*)'|"([^"]*)"|([^\n]+))/
+      /(?:^|\n)(?:(?:export|declare\s+-x|typeset\s+-x)\s+)?TMUX_PANE=(?:'([^']*)'|"([^"]*)"|([^\n]+))/
     );
     const pane = match?.[1] ?? match?.[2] ?? match?.[3];
     return pane ? pane.trim() : null;

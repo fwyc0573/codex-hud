@@ -3,10 +3,10 @@
  * Phase 3: Redesigned to match claude-hud layout
  * 
  * Layout:
- * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
+ * Row 1: project-name git:(branch *) | ⏱️ 10m
  * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
  * Row 3: Tokens: 12.5K | Ctx: ████░░░░ 45% (50K/128K)
- * Row 4: Dir: ~/project | Session: abc12345
+ * Row 4: Session: abc12345
  * Row 5 (optional): ◐ Edit: file.ts | ✓ Read ×3
  */
 
@@ -68,19 +68,17 @@ function renderCompactLayout(data: HudData, layout: LayoutConfig, width: number)
 
 /**
  * Render the expanded layout (multiple lines)
- * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
+ * Row 1: project-name git:(branch *) | ⏱️ 10m
  * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
  * Row 3: Tokens: 12.5K | Ctx: ████░░░░ 45% (50K/128K)
- * Row 4: Dir: ~/project | Session: abc12345
+ * Row 4: Session: abc12345
  * Row 5+: Activity lines (tools, todos)
  */
 function renderExpandedLayout(data: HudData, layout: LayoutConfig, width: number): string[] {
   const lines: string[] = [];
   
-  // Row 1: Identity | Project | Duration
+  // Row 1: Project | Duration
   const row1Parts: string[] = [];
-  const identityLine = renderIdentityLine(data, layout, { maxWidth: width });
-  row1Parts.push(identityLine);
   row1Parts.push(renderProjectLine(data));
   
   const usageLine = renderUsageLine(data, layout);
@@ -90,13 +88,12 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig, width: number
   
   const separator = layout.showSeparators ? theme.separator(' │ ') : ' ';
   let row1 = row1Parts.join(separator);
-  if (usageLine && visualLength(row1) > width) {
-    row1 = row1Parts.slice(0, 2).join(separator);
-  }
   if (visualLength(row1) > width) {
-    const availableForProject = Math.max(0, width - visualLength(identityLine) - visualLength(separator));
+    const availableForProject = usageLine
+      ? Math.max(0, width - visualLength(usageLine) - visualLength(separator))
+      : width;
     const projectLine = renderProjectLine(data, { includeFileStats: false, maxWidth: availableForProject });
-    row1 = [identityLine, projectLine].join(separator);
+    row1 = usageLine ? [projectLine, usageLine].join(separator) : projectLine;
   }
   lines.push(row1);
   

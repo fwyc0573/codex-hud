@@ -256,22 +256,7 @@ export function renderTokenLine(data: HudData): string | null {
 export function renderSessionDetailLine(data: HudData): string | null {
   const parts: string[] = [];
   
-  // Always show session info if we have a session
   const session = data.session;
-  
-  // Show working directory
-  const cwd = session?.cwd || data.project.cwd;
-  if (cwd) {
-    const home = process.env.HOME || '';
-    let displayPath = cwd;
-    if (home && cwd.startsWith(home)) {
-      displayPath = '~' + cwd.slice(home.length);
-    }
-    if (displayPath.length > 50) {
-      displayPath = '…' + displayPath.slice(-49);
-    }
-    parts.push(colors.dim('Dir: ') + theme.value(displayPath));
-  }
 
   // Show session ID if available
   if (session?.id) {

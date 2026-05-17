@@ -2,6 +2,7 @@
 set -e
 
 session_name="$1"
+trigger_pane="${2:-}"
 
 if [[ -z "$session_name" ]]; then
     session_name=$(tmux display -p "#{session_name}" 2>/dev/null || true)
@@ -134,6 +135,14 @@ fi
 tmux set-option -t "$session_name" -q @codex_hud_height "$target"
 
 current=$(tmux display -p -t "$pane" "#{pane_height}" 2>/dev/null || true)
+if [[ "$auto" == "0" && -n "$trigger_pane" && "$trigger_pane" == "$pane" ]]; then
+    if is_positive_int "$current"; then
+        tmux set-option -t "$session_name" -q @codex_hud_base_height "$current"
+        tmux set-option -t "$session_name" -q @codex_hud_height "$current"
+    fi
+    exit 0
+fi
+
 if [[ -n "$current" && "$current" != "$target" ]]; then
     tmux resize-pane -t "$pane" -y "$target" 2>/dev/null || true
 fi

@@ -18,6 +18,18 @@ import type {
   TokenUsageInfo,
 } from '../types.js';
 
+function cloneSessionInfo(session: SessionInfo | null | undefined): SessionInfo | null {
+  if (!session) {
+    return null;
+  }
+
+  return {
+    ...session,
+    startTime: new Date(session.startTime),
+    git: session.git ? { ...session.git } : undefined,
+  };
+}
+
 /**
  * Result of parsing a rollout file
  */
@@ -91,7 +103,8 @@ export async function parseRolloutFile(
   rolloutPath: string,
   fromOffset: number = 0,
   maxRecentCalls: number = 10,
-  runningCalls: Map<string, ToolCall> = new Map()
+  runningCalls: Map<string, ToolCall> = new Map(),
+  initialSession: SessionInfo | null = null
 ): Promise<RolloutParseOutput> {
   const toolActivity: ToolActivity = {
     recentCalls: [],
@@ -100,9 +113,12 @@ export async function parseRolloutFile(
     lastUpdateTime: new Date(),
   };
 
-  let session: SessionInfo | null = null;
+  let session: SessionInfo | null = cloneSessionInfo(initialSession);
   let sessionModel: string | undefined;
   let sessionReasoningEffort: string | undefined;
+  let sessionApprovalPolicy: string | undefined;
+  let sessionSandboxMode: string | undefined;
+  let sessionCollaborationMode: string | undefined;
   let planProgress: PlanProgress | null = null;
   let tokenUsage: TokenUsageInfo | null = null;
   let compactCount = 0;
@@ -187,14 +203,18 @@ export async function parseRolloutFile(
         lastEventTime = timestamp;
         if (entry.type === 'session_meta') {
           const meta = entry.payload as SessionMetaPayload;
+          const existingSession = session;
           session = {
             id: meta.id,
             rolloutPath,
             startTime: new Date(meta.timestamp),
             cwd: meta.cwd,
             cliVersion: meta.cli_version,
-            model: sessionModel,
-            reasoningEffort: sessionReasoningEffort,
+            model: sessionModel ?? existingSession?.model,
+            reasoningEffort: sessionReasoningEffort ?? existingSession?.reasoningEffort,
+            approvalPolicy: sessionApprovalPolicy ?? existingSession?.approvalPolicy,
+            sandboxMode: sessionSandboxMode ?? existingSession?.sandboxMode,
+            collaborationMode: sessionCollaborationMode ?? existingSession?.collaborationMode,
             modelProvider: meta.model_provider,
             git: meta.git
               ? {
@@ -208,6 +228,9 @@ export async function parseRolloutFile(
           const contextModel = payload.model ?? payload.collaboration_mode?.settings?.model;
           const reasoningEffort =
             payload.reasoning_effort ?? payload.collaboration_mode?.settings?.reasoning_effort;
+          const approvalPolicy = payload.approval_policy;
+          const sandboxMode = payload.sandbox_policy?.type;
+          const collaborationMode = payload.collaboration_mode?.mode;
 
           if (contextModel) {
             sessionModel = contextModel;
@@ -220,6 +243,27 @@ export async function parseRolloutFile(
             sessionReasoningEffort = reasoningEffort;
             if (session) {
               session.reasoningEffort = reasoningEffort;
+            }
+          }
+
+          if (approvalPolicy) {
+            sessionApprovalPolicy = approvalPolicy;
+            if (session) {
+              session.approvalPolicy = approvalPolicy;
+            }
+          }
+
+          if (sandboxMode) {
+            sessionSandboxMode = sandboxMode;
+            if (session) {
+              session.sandboxMode = sandboxMode;
+            }
+          }
+
+          if (collaborationMode) {
+            sessionCollaborationMode = collaborationMode;
+            if (session) {
+              session.collaborationMode = collaborationMode;
             }
           }
         } else if (entry.type === 'response_item') {
@@ -292,6 +336,21 @@ export async function parseRolloutFile(
             // /compact command was executed - track it
             compactCount++;
             lastCompactTime = timestamp;
+          } else if (payload.type === 'task_started') {
+            if (payload.collaboration_mode_kind) {
+              sessionCollaborationMode = payload.collaboration_mode_kind;
+              if (session) {
+                session.collaborationMode = payload.collaboration_mode_kind;
+              }
+            }
+
+            if (payload.model_context_window) {
+              if (!tokenUsage) {
+                tokenUsage = { model_context_window: payload.model_context_window };
+              } else {
+                tokenUsage.model_context_window = payload.model_context_window;
+              }
+            }
           } else if (payload.type === 'turn_started' && payload.model_context_window) {
             // New turn started - update context window if provided
             if (!tokenUsage) {
@@ -364,7 +423,8 @@ export class RolloutParser {
       this.rolloutPath,
       this.lastOffset,
       this.maxRecentCalls,
-      this.runningCalls
+      this.runningCalls,
+      this.cachedResult?.session ?? null
     );
 
     this.lastOffset = newOffset;
@@ -376,9 +436,6 @@ export class RolloutParser {
 
     // Merge with cached result for session info and accumulated stats
     if (this.cachedResult) {
-      // Keep session from first parse
-      result.session = this.cachedResult.session ?? result.session;
-
       // Merge tool activity
       result.toolActivity.totalCalls += this.cachedResult.toolActivity.totalCalls;
       for (const [type, count] of Object.entries(

@@ -100,7 +100,11 @@ export function getMcpServerCount(config: CodexConfig): number {
  * Get approval policy display name
  */
 export function getApprovalPolicyDisplay(config: CodexConfig): string {
-  switch (config.approval_policy) {
+  return getApprovalPolicyDisplayValue(config.approval_policy);
+}
+
+export function getApprovalPolicyDisplayValue(approvalPolicy?: string): string {
+  switch (approvalPolicy) {
     case 'never':
       return 'auto';
     case 'on-failure':
@@ -110,6 +114,6 @@ export function getApprovalPolicyDisplay(config: CodexConfig): string {
     case 'untrusted':
       return 'untrust';
     default:
-      return config.approval_policy || 'default';
+      return approvalPolicy || 'default';
   }
 }

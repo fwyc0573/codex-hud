@@ -36,6 +36,10 @@ const rolloutPath = writeRollout([
       cwd: '/local/ycfeng/codex-hud',
       current_date: '2026-04-09',
       timezone: 'Asia/Hong_Kong',
+      approval_policy: 'never',
+      sandbox_policy: {
+        type: 'danger-full-access',
+      },
       model: 'gpt-5.4',
       collaboration_mode: {
         mode: 'plan',
@@ -56,6 +60,17 @@ assert.equal(
   'xhigh',
   'turn_context should populate session reasoning effort'
 );
+assert.equal(result.session?.approvalPolicy, 'never', 'turn_context should populate approval policy');
+assert.equal(
+  result.session?.sandboxMode,
+  'danger-full-access',
+  'turn_context should populate sandbox mode'
+);
+assert.equal(
+  result.session?.collaborationMode,
+  'plan',
+  'turn_context should populate collaboration mode'
+);
 
 const parser = new RolloutParser(5);
 parser.setRolloutPath(rolloutPath);
@@ -66,6 +81,21 @@ assert.equal(
   parserResult?.session?.reasoningEffort,
   'xhigh',
   'stateful parser should keep session reasoning effort'
+);
+assert.equal(
+  parserResult?.session?.approvalPolicy,
+  'never',
+  'stateful parser should keep approval policy'
+);
+assert.equal(
+  parserResult?.session?.sandboxMode,
+  'danger-full-access',
+  'stateful parser should keep sandbox mode'
+);
+assert.equal(
+  parserResult?.session?.collaborationMode,
+  'plan',
+  'stateful parser should keep collaboration mode'
 );
 
 const rolloutWithRunningCall = writeRollout([
@@ -131,6 +161,100 @@ assert.equal(
   switched?.toolActivity.recentCalls.length,
   0,
   'switching rollouts should clear running tool calls from the previous session'
+);
+
+const incrementalRolloutPath = writeRollout([
+  {
+    timestamp: '2026-04-20T08:00:00.000Z',
+    type: 'session_meta',
+    payload: {
+      id: '019daa00-3ef8-7292-a039-fdf7ecd4f53e',
+      timestamp: '2026-04-20T08:00:00.000Z',
+      cwd: '/local/ycfeng/codex-hud',
+      originator: 'codex-cli',
+      cli_version: '0.121.0',
+      source: 'cli',
+      model_provider: 'openai',
+    },
+  },
+  {
+    timestamp: '2026-04-20T08:00:01.000Z',
+    type: 'turn_context',
+    payload: {
+      model: 'gpt-5.4',
+      approval_policy: 'on-request',
+      sandbox_policy: {
+        type: 'workspace-write',
+      },
+      collaboration_mode: {
+        mode: 'default',
+        settings: {
+          model: 'gpt-5.4',
+          reasoning_effort: 'high',
+        },
+      },
+    },
+  },
+]);
+
+const incrementalParser = new RolloutParser(5);
+incrementalParser.setRolloutPath(incrementalRolloutPath);
+const firstIncremental = await incrementalParser.parse();
+
+assert.equal(
+  firstIncremental?.session?.approvalPolicy,
+  'on-request',
+  'initial incremental parse should capture approval policy'
+);
+assert.equal(
+  firstIncremental?.session?.collaborationMode,
+  'default',
+  'initial incremental parse should capture collaboration mode'
+);
+
+fs.appendFileSync(
+  incrementalRolloutPath,
+  `${JSON.stringify({
+    timestamp: '2026-04-20T08:00:10.000Z',
+    type: 'turn_context',
+    payload: {
+      approval_policy: 'never',
+      sandbox_policy: {
+        type: 'danger-full-access',
+      },
+      collaboration_mode: {
+        mode: 'plan',
+        settings: {
+          model: 'gpt-5.4',
+          reasoning_effort: 'xhigh',
+        },
+      },
+    },
+  })}\n`,
+  'utf8'
+);
+
+const secondIncremental = await incrementalParser.parse();
+
+assert.equal(
+  secondIncremental?.session?.approvalPolicy,
+  'never',
+  'incremental parse should refresh approval policy from later turn_context entries'
+);
+assert.equal(
+  secondIncremental?.session?.sandboxMode,
+  'danger-full-access',
+  'incremental parse should refresh sandbox mode from later turn_context entries'
+);
+assert.equal(
+  secondIncremental?.session?.collaborationMode,
+  'plan',
+  'incremental parse should refresh collaboration mode from later turn_context entries'
+);
+assert.equal(
+  secondIncremental?.session?.reasoningEffort,
+  'xhigh',
+  'incremental parse should refresh reasoning effort from later turn_context entries'
 );
 
 console.log('test-rollout-turn-context: PASS');

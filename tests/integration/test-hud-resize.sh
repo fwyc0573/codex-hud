@@ -77,6 +77,53 @@ run_case() {
   fi
 }
 
+run_manual_drag_case() {
+  local dragged_height="$1"
+  local log_file
+  log_file="$(mktemp)"
+
+  export TMUX_LOG_FILE="$log_file"
+  export TMUX_MAIN_PANE_ID="%1"
+  export TMUX_STORED_MAIN_PANE="%1"
+  export TMUX_PANE_ID="%2"
+  export TMUX_PANES=$'%1\n%2'
+  export TMUX_BASE_HEIGHT="5"
+  export TMUX_HEIGHT="5"
+  export TMUX_AUTO="0"
+  export TMUX_HEIGHT_MIN="5"
+  export TMUX_HEIGHT_MAX="12"
+  export TMUX_PANE_WIDTH="70"
+  export TMUX_PANE_HEIGHT="$dragged_height"
+  export TMUX_MAIN_PANE_IN_MODE="0"
+  export TMUX_FOCUS_MAIN="1"
+
+  "$ROOT_DIR/bin/codex-hud-resize" "session-1" "%2"
+
+  if ! grep -q "@codex_hud_base_height=${dragged_height}" "$log_file"; then
+    echo "Expected manual drag to persist base height ${dragged_height}, log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+
+  if ! grep -q "@codex_hud_height=${dragged_height}" "$log_file"; then
+    echo "Expected manual drag to persist current height ${dragged_height}, log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+
+  if grep -q "resize-pane" "$log_file"; then
+    echo "Did not expect manual drag flow to force-resize the pane back, log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+
+  if grep -q "select-pane -t %1" "$log_file"; then
+    echo "Did not expect manual drag flow to steal focus back to main pane, log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+}
+
 # Default behavior (auto unset) should keep base height and refocus main pane.
 run_case 70 5 "" "" "0" "1" "%1"
 
@@ -94,5 +141,8 @@ run_case 70 5 "" "" "0" "0" "%1"
 
 # If stored main pane is stale, fallback still finds and focuses the real main pane.
 run_case 70 5 "" "" "0" "1" "%9"
+
+# Manual drag on the HUD pane should persist the new height instead of snapping back.
+run_manual_drag_case 9
 
 echo "test-hud-resize: PASS"

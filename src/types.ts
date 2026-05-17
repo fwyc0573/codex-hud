@@ -176,7 +176,14 @@ export interface FunctionOutput {
 }
 
 export interface EventMsgPayload {
-  type: 'plan_update' | 'token_count' | 'rate_limit' | 'context_compacted' | 'turn_started' | 'other';
+  type:
+    | 'plan_update'
+    | 'token_count'
+    | 'rate_limit'
+    | 'context_compacted'
+    | 'turn_started'
+    | 'task_started'
+    | 'other';
   explanation?: string;
   plan?: PlanStep[];
   info?: TokenUsageInfo;
@@ -186,12 +193,18 @@ export interface EventMsgPayload {
   summary?: string;
   // For turn_started events
   model_context_window?: number;
+  collaboration_mode_kind?: string;
 }
 
 export interface TurnContextPayload {
   model?: string;
   reasoning_effort?: string;
+  approval_policy?: string;
+  sandbox_policy?: {
+    type?: string;
+  };
   collaboration_mode?: {
+    mode?: string;
     settings?: {
       model?: string;
       reasoning_effort?: string;
@@ -312,6 +325,9 @@ export interface SessionInfo {
   cliVersion: string;
   model?: string;
   reasoningEffort?: string;
+  approvalPolicy?: string;
+  sandboxMode?: string;
+  collaborationMode?: string;
   modelProvider?: string;
   git?: {
     branch?: string;
@@ -332,6 +348,7 @@ export interface HudData {
   
   // Session and rollout data
   session?: SessionInfo;
+  runtimeSession?: Partial<SessionInfo>;
   
   // Context/token usage
   contextUsage?: ContextUsage;

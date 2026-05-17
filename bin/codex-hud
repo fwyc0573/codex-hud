@@ -20,6 +20,9 @@ set -e
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${CODEX_HUD_SCRIPT_DIR:-}" ]]; then
+    SCRIPT_DIR="$CODEX_HUD_SCRIPT_DIR"
+fi
 HUD_DIR="$(dirname "$SCRIPT_DIR")"
 HUD_HEIGHT="${CODEX_HUD_HEIGHT:-}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
@@ -27,6 +30,8 @@ ALIAS_MARKER="# codex-hud alias"
 CODEX_CLI_PATH=""
 FORCE_ATTACH="0"
 FORCE_NEW_SESSION="0"
+DEFER_FINAL_ATTACH="0"
+SESSION_NAME_FILE="${CODEX_HUD_SESSION_NAME_FILE:-}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -211,6 +216,30 @@ detect_os() {
     fi
 }
 
+is_windows_native_shell() {
+    case "$(uname -s 2>/dev/null || true)" in
+        MINGW*|MSYS*|CYGWIN*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+resolve_windows_tmux_bash() {
+    if ! is_windows_native_shell; then
+        return 1
+    fi
+
+    if [[ -n "${CODEX_HUD_WINDOWS_BASH_EXE:-}" ]]; then
+        printf "%s\n" "$CODEX_HUD_WINDOWS_BASH_EXE"
+        return 0
+    fi
+
+    return 1
+}
+
 # Install tmux automatically
 install_tmux() {
     local os
@@ -373,10 +402,19 @@ set_fixed_hud_height() {
     local hud_pane_id="$2"
     local height="$3"
     local main_pane_id="${4:-}"
-    local resize_helper="$SCRIPT_DIR/codex-hud-resize"
+    local resize_helper="${CODEX_HUD_RESIZE_HELPER:-$SCRIPT_DIR/codex-hud-resize}"
+    local resize_helper_mode="none"
 
     if [[ -z "$session_name" || -z "$hud_pane_id" || -z "$height" ]]; then
         return 0
+    fi
+
+    if [[ -f "$resize_helper" ]]; then
+        if is_windows_native_shell || [[ ! -x "$resize_helper" ]]; then
+            resize_helper_mode="bash"
+        elif [[ -x "$resize_helper" ]]; then
+            resize_helper_mode="direct"
+        fi
     fi
 
     local auto_setting
@@ -421,17 +459,27 @@ set_fixed_hud_height() {
         tmux set-option -t "$session_name" -q @codex_hud_main_pane "$main_pane_id"
     fi
 
-    if [[ -x "$resize_helper" ]]; then
+    if [[ "$resize_helper_mode" == "bash" ]]; then
+        bash "$resize_helper" "$session_name"
+    elif [[ "$resize_helper_mode" == "direct" ]]; then
         "$resize_helper" "$session_name"
     else
         tmux resize-pane -t "$hud_pane_id" -y "$height" 2>/dev/null || true
     fi
 
+    if [[ "$focus_main_setting" == "1" && -n "$main_pane_id" ]]; then
+        tmux select-pane -t "$main_pane_id" 2>/dev/null || true
+    fi
+
     local hook_cmd
-    if [[ -x "$resize_helper" ]]; then
+    if [[ "$resize_helper_mode" == "bash" ]]; then
+        hook_cmd="run-shell \"bash \\\"$resize_helper\\\" #{session_name}\""
+        tmux set-hook -t "$session_name" client-resized "$hook_cmd"
+        tmux set-hook -t "$session_name" after-resize-pane "run-shell \"bash \\\"$resize_helper\\\" #{session_name} #{hook_pane}\""
+    elif [[ "$resize_helper_mode" == "direct" ]]; then
         hook_cmd="run-shell \"$resize_helper #{session_name}\""
         tmux set-hook -t "$session_name" client-resized "$hook_cmd"
-        tmux set-hook -t "$session_name" after-resize-pane "$hook_cmd"
+        tmux set-hook -t "$session_name" after-resize-pane "run-shell \"$resize_helper #{session_name} #{hook_pane}\""
     fi
 }
 
@@ -454,6 +502,10 @@ check_existing_session() {
 
 # Cleanup function - only cleanup on explicit exit, not on attach to existing
 cleanup() {
+    if [[ "$DEFER_FINAL_ATTACH" == "1" ]]; then
+        return 0
+    fi
+
     # Only kill session if we created it (not if we attached to existing)
     if [[ "${SESSION_CREATED:-}" == "true" ]]; then
         if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -507,7 +559,34 @@ create_session() {
     shift
     local codex_args=("$@")
     local cwd_escaped
+    local tmux_windows_bash
+    local native_windows_home=""
+    local native_windows_home_escaped=""
+    local native_windows_codex_home=""
+    local native_windows_codex_home_escaped=""
+    local main_cmd
+    local start_signal=""
+    local session_runtime_dir=""
+    local main_runner=""
+    local hud_runner=""
+    local runtime_capture_file=""
+    local runtime_capture_file_windows=""
     cwd_escaped=$(printf "%q" "$cwd")
+    tmux_windows_bash=$(resolve_windows_tmux_bash 2>/dev/null || true)
+    if [[ -n "$tmux_windows_bash" ]]; then
+        native_windows_home="${USERPROFILE:-}"
+        if [[ -n "$native_windows_home" ]]; then
+            native_windows_home_escaped=$(printf "%q" "$native_windows_home")
+        fi
+
+        native_windows_codex_home="${CODEX_HOME:-}"
+        if [[ -z "$native_windows_codex_home" && -n "$native_windows_home" ]]; then
+            native_windows_codex_home="${native_windows_home}\\.codex"
+        fi
+        if [[ -n "$native_windows_codex_home" ]]; then
+            native_windows_codex_home_escaped=$(printf "%q" "$native_windows_codex_home")
+        fi
+    fi
     
     # Calculate terminal dimensions
     local term_height
@@ -523,7 +602,12 @@ create_session() {
     done
     
     # Create new detached session
-    tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    if [[ -n "$tmux_windows_bash" ]]; then
+        tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height" "$tmux_windows_bash"
+        tmux set-option -t "$SESSION_NAME" default-shell "$tmux_windows_bash" 2>/dev/null || true
+    else
+        tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    fi
     # Keep wheel scrolling available in Codex pane by default.
     local mouse_setting
     mouse_setting=$(parse_boolean_setting "CODEX_HUD_MOUSE" "${CODEX_HUD_MOUSE:-}" "1") || exit 1
@@ -552,27 +636,105 @@ create_session() {
     if [[ -z "$main_pane_id" ]]; then
         error "Failed to detect tmux pane for session: $SESSION_NAME"
     fi
-    
-    # Send the codex command to the main pane; auto-cleanup when it exits
-    tmux send-keys -t "$SESSION_NAME" "cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'" C-m
-    
-    # Wait a moment for the session to be ready
-    sleep 0.2
+
+    if [[ -n "$tmux_windows_bash" ]]; then
+        start_signal="codex-hud-start-${SESSION_NAME}"
+        session_runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-hud-native.XXXXXX")
+        runtime_capture_file="$session_runtime_dir/pane-capture.log"
+        : > "$runtime_capture_file"
+        if command_exists cygpath; then
+            runtime_capture_file_windows=$(cygpath -w "$runtime_capture_file" 2>/dev/null || true)
+        fi
+        if [[ -z "$runtime_capture_file_windows" ]]; then
+            runtime_capture_file_windows="$runtime_capture_file"
+        fi
+        main_runner="$session_runtime_dir/main.sh"
+        cat > "$main_runner" <<EOF
+#!/usr/bin/env bash
+export TERM=xterm-256color
+export COLORTERM=truecolor
+EOF
+        if [[ -n "$native_windows_home_escaped" ]]; then
+            cat >> "$main_runner" <<EOF
+export HOME=$native_windows_home_escaped
+EOF
+        fi
+        if [[ -n "$native_windows_codex_home_escaped" ]]; then
+            cat >> "$main_runner" <<EOF
+export CODEX_HOME=$native_windows_codex_home_escaped
+EOF
+        fi
+        cat >> "$main_runner" <<EOF
+tmux wait-for '$start_signal'
+cd ${cwd_escaped}
+$codex_cmd
+rc=\$?
+rm -rf $(printf "%q" "$session_runtime_dir")
+tmux kill-session -t '$SESSION_NAME'
+exit \$rc
+EOF
+        chmod +x "$main_runner"
+        main_cmd="bash $(printf "%q" "$main_runner")"
+    else
+        main_cmd="cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'"
+    fi
+
+    tmux send-keys -t "$main_pane_id" "$main_cmd" C-m
+
+    if [[ -z "$tmux_windows_bash" ]]; then
+        sleep 0.2
+    elif [[ -n "$runtime_capture_file" ]]; then
+        local runtime_capture_file_escaped
+        runtime_capture_file_escaped=$(printf "%q" "$runtime_capture_file")
+        tmux pipe-pane -o -t "$main_pane_id" "cat >> $runtime_capture_file_escaped" 2>/dev/null || true
+    fi
     
     # Split the window based on HUD_POSITION
     local session_start
     session_start=$(date +%s)
-    local hud_cmd="cd ${cwd_escaped} && LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD=${cwd_escaped} CODEX_HUD_MAIN_PANE='$main_pane_id' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' CODEX_HUD_CLEAR_SCROLLBACK='${CODEX_HUD_CLEAR_SCROLLBACK:-}' node '$HUD_DIR/dist/index.js'"
+    local hud_capture_file_env=""
+    if [[ -n "$runtime_capture_file_windows" ]]; then
+        hud_capture_file_env=" CODEX_HUD_PANE_CAPTURE_FILE=$(printf "%q" "$runtime_capture_file_windows")"
+    fi
+    local hud_cmd="cd ${cwd_escaped} && LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD=${cwd_escaped} CODEX_HUD_MAIN_PANE='$main_pane_id' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' CODEX_HUD_CLEAR_SCROLLBACK='${CODEX_HUD_CLEAR_SCROLLBACK:-}'${hud_capture_file_env} node '$HUD_DIR/dist/index.js'"
+    if [[ -n "$tmux_windows_bash" ]]; then
+        hud_runner="$session_runtime_dir/hud.sh"
+        cat > "$hud_runner" <<EOF
+#!/usr/bin/env bash
+export TERM=xterm-256color
+export COLORTERM=truecolor
+EOF
+        if [[ -n "$native_windows_codex_home_escaped" ]]; then
+            cat >> "$hud_runner" <<EOF
+export CODEX_HOME=$native_windows_codex_home_escaped
+EOF
+        fi
+        cat >> "$hud_runner" <<EOF
+$hud_cmd
+EOF
+        chmod +x "$hud_runner"
+        hud_cmd="bash $(printf "%q" "$hud_runner")"
+    fi
     
     if [[ "$HUD_POSITION" == "top" ]]; then
         # Split at top, then swap panes
         local hud_pane_id
-        hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$hud_cmd")
+        if [[ -n "$tmux_windows_bash" ]]; then
+            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$tmux_windows_bash")
+            tmux send-keys -t "$hud_pane_id" "$hud_cmd" C-m
+        else
+            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$hud_cmd")
+        fi
         tmux select-pane -t "$main_pane_id"
     else
         # Default: bottom
         local hud_pane_id
-        hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$hud_cmd")
+        if [[ -n "$tmux_windows_bash" ]]; then
+            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$tmux_windows_bash")
+            tmux send-keys -t "$hud_pane_id" "$hud_cmd" C-m
+        else
+            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$hud_cmd")
+        fi
         tmux select-pane -t "$main_pane_id"
     fi
 
@@ -580,15 +742,42 @@ create_session() {
         set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT" "$main_pane_id"
     fi
 
+    if [[ -n "$tmux_windows_bash" ]]; then
+        local attach_refresh_height="$HUD_HEIGHT"
+        if [[ "$HUD_HEIGHT" =~ ^[0-9]+$ ]]; then
+            attach_refresh_height=$((HUD_HEIGHT + 1))
+            if [[ "$attach_refresh_height" -ge "$term_height" ]]; then
+                attach_refresh_height="$HUD_HEIGHT"
+            fi
+        fi
+
+        # Native tmux-windows on PowerShell/ConPTY can attach successfully but
+        # fail to repaint the first frame until after the client is attached.
+        # Release the main pane only on client attach, then force an immediate
+        # repaint so the first Codex frame becomes visible in PowerShell/ConPTY.
+        tmux set-hook -t "$SESSION_NAME" client-attached "wait-for -S '$start_signal'"
+        if [[ -n "${hud_pane_id:-}" && "$attach_refresh_height" != "$HUD_HEIGHT" ]]; then
+            tmux set-hook -at "$SESSION_NAME" client-attached "resize-pane -t '$hud_pane_id' -y '$attach_refresh_height'"
+            tmux set-hook -at "$SESSION_NAME" client-attached "resize-pane -t '$hud_pane_id' -y '$HUD_HEIGHT'"
+        fi
+        if [[ -n "$main_pane_id" ]]; then
+            tmux set-hook -at "$SESSION_NAME" client-attached "select-pane -t '$main_pane_id'"
+        fi
+        tmux set-hook -at "$SESSION_NAME" client-attached "refresh-client"
+    fi
+
     # Bind toggle key (Prefix + H) to switch HUD modes for this session
     tmux bind-key -T prefix H run-shell "tmux if-shell -F '#{@codex_hud_pane}' 'tmux send-keys -t #{@codex_hud_pane} C-t' ''"
-    
+
     SESSION_CREATED="true"
 }
 
 # Main function
 main() {
     local codex_args=()
+    if [[ "${CODEX_HUD_WINDOWS_DEFER_ATTACH:-}" == "1" ]]; then
+        DEFER_FINAL_ATTACH="1"
+    fi
 
     # Parse wrapper arguments and pass the rest to codex CLI.
     while [[ "$#" -gt 0 ]]; do
@@ -634,6 +823,12 @@ main() {
         if [[ -n "$hud_pane_id" ]]; then
             set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT" "$main_pane_id"
         fi
+        if [[ "$DEFER_FINAL_ATTACH" == "1" ]]; then
+            if [[ -n "$SESSION_NAME_FILE" ]]; then
+                printf "%s\n" "$SESSION_NAME" > "$SESSION_NAME_FILE"
+            fi
+            return 0
+        fi
         tmux attach-session -t "$SESSION_NAME"
         return 0
     fi
@@ -644,6 +839,13 @@ main() {
     # Create new session
     info "Starting Codex with HUD (session: $SESSION_NAME)..."
     create_session "$cwd" "${codex_args[@]}"
+
+    if [[ "$DEFER_FINAL_ATTACH" == "1" ]]; then
+        if [[ -n "$SESSION_NAME_FILE" ]]; then
+            printf "%s\n" "$SESSION_NAME" > "$SESSION_NAME_FILE"
+        fi
+        return 0
+    fi
     
     # Attach to the session
     local main_pane_id

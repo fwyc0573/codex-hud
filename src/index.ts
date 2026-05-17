@@ -7,6 +7,7 @@ import { readCodexConfig } from './collectors/codex-config.js';
 import * as fs from 'fs';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
+import { PaneRuntimeStateCollector } from './collectors/pane-runtime-state.js';
 import { SessionFinder, findActiveRollouts } from './collectors/session-finder.js';
 import { RolloutParser, parseRolloutFile } from './collectors/rollout.js';
 import { createParseQueue } from './utils/parse-queue.js';
@@ -136,6 +137,8 @@ const sessionFinder = new SessionFinder(HUD_CWD_REAL, (session) => {
 
 const rolloutParser = new RolloutParser(10);
 const hudFileWatcher = new HudFileWatcher();
+const paneRuntimeStateCollector =
+  process.platform === 'win32' ? new PaneRuntimeStateCollector() : null;
 
 // Cached data that gets updated by watchers
 let cachedHudData: HudData | null = null;
@@ -215,12 +218,16 @@ async function collectData(): Promise<HudData> {
   // Check for active session
   const session = sessionFinder.check();
 
-  // If we have a session, parse the rollout
+  // Re-parse the current rollout every refresh tick. The parser is incremental,
+  // so this keeps runtime session state fresh even if file watcher events are
+  // missed on Windows.
   let rolloutData = rolloutParser.getCached();
-  if (session && (!rolloutData || configNeedsRefresh)) {
+  if (session) {
     rolloutData = await parseRolloutSafely();
     configNeedsRefresh = false;
   }
+
+  const runtimeSession = !rolloutData?.session ? paneRuntimeStateCollector?.collect() ?? undefined : undefined;
 
   // Build context usage from token usage if available
   // Matches codex "context window left" calculation based on last_token_usage.
@@ -233,6 +240,7 @@ async function collectData(): Promise<HudData> {
   const hudData: HudData = {
     ...syncData,
     session: rolloutData?.session ?? undefined,
+    runtimeSession,
     toolActivity: rolloutData?.toolActivity ?? undefined,
     planProgress: rolloutData?.planProgress ?? undefined,
     tokenUsage: rolloutData?.tokenUsage ?? undefined,

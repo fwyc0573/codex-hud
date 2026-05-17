@@ -170,3 +170,27 @@ MIT
 ## 致谢
 
 灵感来源于 Jarrod Watts 的 [claude-hud](https://github.com/jarrodwatts/claude-hud)。为 [OpenAI Codex CLI](https://github.com/openai/codex) 构建。
+
+## Windows 双入口说明（2026-04-19）
+
+Windows 现在支持两种启动方式：
+
+- `codex`：Windows 原生入口；如果缺少 tmux 兼容运行时，会自动降级为普通 `codex` CLI。
+- `codex-hud-wsl`：WSL 内完整 HUD 模式（Ubuntu + tmux）。
+
+PowerShell 安装方式：
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+.\bin\codex-hud-install.ps1
+```
+
+说明：`codex-hud-install.ps1` 会写入 PowerShell profile 管理块，并提供以下命令映射：
+
+- `codex`
+- `codex-resume`
+- `codex-hud-wsl`
+- `codex-hud-sync`
+- `codex-hud-upgrade`
+- `codex-hud-uninstall`

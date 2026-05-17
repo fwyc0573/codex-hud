@@ -9,6 +9,8 @@
 
 Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex). Lightweight, zero-config, works inside tmux.
 
+> This branch documents the Windows dual-entry build: native PowerShell is the default entry, WSL is the explicit full-HUD entry, and Linux/macOS keep the existing Bash flow.
+
 > Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.
 
 ![Codex HUD — Single Session](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
@@ -46,12 +48,63 @@ cd codex-hud
 codex
 ```
 
+### Windows (PowerShell + WSL Dual Entry)
+
+This branch adds a Windows-first install and launch flow:
+
+- `codex` tries native PowerShell HUD first.
+- If native HUD cannot start or exits too quickly, it automatically retries with `codex-hud-wsl`.
+- If both HUD paths are unavailable, it prints a warning and falls back to plain native `codex`.
+- `codex-hud-wsl` is the explicit full-HUD command for WSL Ubuntu.
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+.\bin\codex-hud-install.ps1
+
+# Reload profile, then:
+codex            # Default: native PowerShell HUD, then WSL HUD fallback, then plain codex
+codex-hud-wsl    # Explicit: full HUD in WSL (Ubuntu + tmux)
+```
+
+`codex-hud-install.ps1` will automatically:
+
+- install Node.js LTS on Windows if needed
+- reinstall `@openai/codex` globally on Windows
+- install Windows native `tmux` via `winget` if needed
+- ensure Ubuntu WSL is available when possible
+- provision `nodejs`, `npm`, `tmux`, and `@openai/codex` inside WSL
+
+#### PowerShell Default Path
+
+```powershell
+. $PROFILE.CurrentUserAllHosts
+codex
+codex --self-check
+codex-resume
+```
+
+Use this when you want the normal Windows entry. On this branch it is the default command path after install.
+
+#### WSL Full HUD Path
+
+```powershell
+. $PROFILE.CurrentUserAllHosts
+codex-hud-wsl
+codex-hud-wsl "help me debug this"
+```
+
+Use this when you want the full Bash + tmux HUD inside WSL Ubuntu.
+
 ### Management Commands
 
 After the first install, these are available in your shell:
 
 | Command | Description |
 |---------|-------------|
+| `codex` | Default Windows entry: native HUD, then WSL fallback, then plain codex |
+| `codex-resume` | Resume through the same Windows entry chain |
+| `codex-hud-wsl` | Launch full HUD mode via WSL |
 | `codex-hud-sync` | Rebuild and refresh aliases for the current checkout |
 | `codex-hud-upgrade` | Pull latest changes, then rebuild |
 | `codex-hud-uninstall` | Remove aliases and stop HUD sessions |
@@ -81,6 +134,7 @@ codex                        # Launch with HUD
 codex --model gpt-5          # Pass any Codex CLI args
 codex "help me debug this"   # With prompt
 codex-resume                 # Resume last session
+codex-hud-wsl                # Explicit full HUD in WSL (Windows only)
 ```
 
 <details>
@@ -143,7 +197,8 @@ enabled = true
 | Linux | Supported |
 | macOS (Apple Silicon) | Supported |
 | macOS (Intel) | Testing pending |
-| Windows | Testing pending |
+| Windows PowerShell | Supported (default entry, native HUD first) |
+| Windows WSL Ubuntu | Supported (`codex-hud-wsl` full HUD entry) |
 
 ## Development
 
@@ -157,6 +212,8 @@ node dist/index.js             # Run HUD directly
 
 | Date | Change |
 |------|--------|
+| 2026-04-20 | Make Windows PowerShell the default entry, add automatic WSL fallback, auto-install native tmux on install, and document Windows dual-mode usage |
+| 2026-04-19 | Add Windows dual-entry support (`codex` native fallback + `codex-hud-wsl` full HUD), plus PowerShell installer/sync/upgrade/uninstall |
 | 2026-04-09 | Add quick install/sync/upgrade/uninstall commands |
 | 2026-04-09 | Bind HUD session to current tmux pane; display reasoning effort |
 | 2026-02-09 | Keep Codex pane focused after resize; refine mouse-scroll defaults |

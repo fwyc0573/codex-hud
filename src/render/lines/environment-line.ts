@@ -6,7 +6,10 @@
 
 import type { HudData } from '../../types.js';
 import { theme, colors, icons } from '../colors.js';
-import { getMcpServerCount, getApprovalPolicyDisplay } from '../../collectors/codex-config.js';
+import {
+  getMcpServerCount,
+  getApprovalPolicyDisplayValue,
+} from '../../collectors/codex-config.js';
 
 /**
  * Render work mode with appropriate color
@@ -22,6 +25,38 @@ function renderWorkMode(mode: 'development' | 'production' | 'unknown'): string 
   }
 }
 
+function renderCollaborationMode(mode: string): string {
+  switch (mode) {
+    case 'plan':
+      return theme.warning('plan');
+    case 'default':
+      return theme.success('default');
+    default:
+      return theme.info(mode);
+  }
+}
+
+function renderEffectiveMode(data: HudData): string {
+  const collaborationMode = data.session?.collaborationMode ?? data.runtimeSession?.collaborationMode;
+  if (collaborationMode) {
+    return renderCollaborationMode(collaborationMode);
+  }
+
+  return renderWorkMode(data.project.workMode);
+}
+
+function renderSandboxMode(sandbox: string): string {
+  if (sandbox === 'danger-full-access') {
+    return theme.error('DANGER');
+  }
+
+  if (sandbox === 'workspace-write') {
+    return theme.warning('ws-write');
+  }
+
+  return theme.info(sandbox);
+}
+
 /**
  * Render the environment line
  * Format: 2 configs | mode: dev | 3 extensions | N AGENTS.md | Approval: policy
@@ -35,7 +70,7 @@ export function renderEnvironmentLine(data: HudData): string | null {
   }
   
   // Codex-specific: Work mode
-  parts.push(colors.dim('mode: ') + renderWorkMode(data.project.workMode));
+  parts.push(colors.dim('mode: ') + renderEffectiveMode(data));
   
   // Codex-specific: Extensions count (MCP servers)
   if (data.project.extensionsCount > 0) {
@@ -65,21 +100,15 @@ export function renderEnvironmentLine(data: HudData): string | null {
   }
   
   // Approval policy
-  const approvalPolicy = getApprovalPolicyDisplay(data.config);
+  const approvalPolicy = getApprovalPolicyDisplayValue(
+    data.session?.approvalPolicy ?? data.runtimeSession?.approvalPolicy ?? data.config.approval_policy
+  );
   parts.push(colors.dim('Approval: ') + theme.value(approvalPolicy));
   
   // Sandbox mode (if set and not default)
-  if (data.config.sandbox_mode) {
-    const sandbox = data.config.sandbox_mode;
-    let sandboxDisplay: string;
-    if (sandbox === 'danger-full-access') {
-      sandboxDisplay = theme.error('DANGER');
-    } else if (sandbox === 'workspace-write') {
-      sandboxDisplay = theme.warning('ws-write');
-    } else {
-      sandboxDisplay = theme.info(sandbox);
-    }
-    parts.push(colors.dim('Sandbox: ') + sandboxDisplay);
+  const sandboxMode = data.session?.sandboxMode ?? data.runtimeSession?.sandboxMode ?? data.config.sandbox_mode;
+  if (sandboxMode) {
+    parts.push(colors.dim('Sandbox: ') + renderSandboxMode(sandboxMode));
   }
   
   if (parts.length === 0) {

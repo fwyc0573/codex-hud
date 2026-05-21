@@ -53,40 +53,39 @@ if (-not (Test-Path -LiteralPath $bashWrapper)) {
 $cwdWindows = (Get-Location).Path
 $cwdWsl = Convert-WindowsPathToWsl -WslCommand $wslCommand -Distro $distro -WindowsPath $cwdWindows
 $wrapperWsl = Convert-WindowsPathToWsl -WslCommand $wslCommand -Distro $distro -WindowsPath $bashWrapper
-$wrapperWslLf = "$wrapperWsl.wsltmp"
+$scriptDirWsl = Convert-WindowsPathToWsl -WslCommand $wslCommand -Distro $distro -WindowsPath $PSScriptRoot
 $resizeWsl = $null
-$resizeWslLf = $null
 
 if (Test-Path -LiteralPath $resizeWrapper) {
     $resizeWsl = Convert-WindowsPathToWsl -WslCommand $wslCommand -Distro $distro -WindowsPath $resizeWrapper
-    $resizeWslLf = "$resizeWsl.wsltmp"
 }
 
-# Windows checkouts often have CRLF; generate an LF-only sibling copy for WSL execution.
+# Windows checkouts often have CRLF; generate LF-only copies in WSL /tmp.
 $bashArgs = Join-BashArguments -Arguments $CliArgs
-$launch = "$(ConvertTo-BashSingleQuoted -Value $wrapperWslLf)"
-if ($resizeWslLf) {
-    $launch = "CODEX_HUD_RESIZE_HELPER=$(ConvertTo-BashSingleQuoted -Value $resizeWslLf) $launch"
+$launchEnv = @("CODEX_HUD_SCRIPT_DIR=$(ConvertTo-BashSingleQuoted -Value $scriptDirWsl)")
+if ($resizeWsl) {
+    $launchEnv += 'CODEX_HUD_RESIZE_HELPER="$tmp_dir/codex-hud-resize"'
 }
+$launch = "$($launchEnv -join ' ') " + '"$tmp_dir/codex-hud"'
 if ($bashArgs) { $launch = "$launch $bashArgs" }
 
 $commandParts = @(
+    'set -e',
+    'tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-hud-wsl.XXXXXX")',
+    'cleanup() { rc=$?; rm -rf "$tmp_dir"; exit $rc; }',
+    'trap cleanup EXIT',
     "cd $(ConvertTo-BashSingleQuoted -Value $cwdWsl)",
-    "tr -d '\r' < $(ConvertTo-BashSingleQuoted -Value $wrapperWsl) > $(ConvertTo-BashSingleQuoted -Value $wrapperWslLf)",
-    "chmod +x $(ConvertTo-BashSingleQuoted -Value $wrapperWslLf)"
+    ("tr -d '\r' < $(ConvertTo-BashSingleQuoted -Value $wrapperWsl) > " + '"$tmp_dir/codex-hud"'),
+    'chmod +x "$tmp_dir/codex-hud"'
 )
 
-$cleanupTargets = @($wrapperWslLf)
-if ($resizeWslLf) {
-    $commandParts += "tr -d '\r' < $(ConvertTo-BashSingleQuoted -Value $resizeWsl) > $(ConvertTo-BashSingleQuoted -Value $resizeWslLf)"
-    $commandParts += "chmod +x $(ConvertTo-BashSingleQuoted -Value $resizeWslLf)"
-    $cleanupTargets += $resizeWslLf
+if ($resizeWsl) {
+    $commandParts += ("tr -d '\r' < $(ConvertTo-BashSingleQuoted -Value $resizeWsl) > " + '"$tmp_dir/codex-hud-resize"')
+    $commandParts += 'chmod +x "$tmp_dir/codex-hud-resize"'
 }
 
 $commandParts += $launch
 $command = ($commandParts -join ' && ')
-$cleanupCommand = 'rm -f ' + (($cleanupTargets | ForEach-Object { ConvertTo-BashSingleQuoted -Value $_ }) -join ' ')
-$command = "$command; rc=`$?; $cleanupCommand; exit `$rc"
 
 & $wslCommand -d $distro -- bash -lc $command
 exit $LASTEXITCODE

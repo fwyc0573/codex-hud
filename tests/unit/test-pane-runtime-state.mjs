@@ -32,6 +32,29 @@ const footerParse = parsePaneRuntimeStateFromCapture(`
 
 assert.equal(footerParse.collaborationMode, 'plan', 'Plan mode footer should map to plan mode');
 
+const latestStateParse = parsePaneRuntimeStateFromCapture(`
+  • Permissions updated to Full Access
+  • Permissions updated to Workspace Write
+  /plan         switch to Plan mode
+  /plan         switch to Default mode
+`);
+
+assert.equal(
+  latestStateParse.approvalPolicy,
+  'on-request',
+  'parser should use the latest permission update in the capture tail'
+);
+assert.equal(
+  latestStateParse.sandboxMode,
+  'workspace-write',
+  'parser should use the latest sandbox update in the capture tail'
+);
+assert.equal(
+  latestStateParse.collaborationMode,
+  'plan',
+  'parser should use the latest mode hint in the capture tail'
+);
+
 let captureIndex = 0;
 const captures = [
   `

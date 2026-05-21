@@ -10,6 +10,9 @@ $profilePath = Get-ProfilePath
 Remove-ManagedProfileBlock -ProfilePath $profilePath
 Write-Info "Removed codex-hud profile block from: $profilePath"
 
+Remove-CmdShims
+Write-Info "Removed codex-hud cmd shims from: $(Get-CmdShimDirectory)"
+
 $wsl = Get-WslCommand
 if ($wsl -and (Test-WslDistroAvailable -WslCommand $wsl -Distro 'Ubuntu')) {
     & $wsl -d Ubuntu -- bash -lc "tmux kill-server >/dev/null 2>&1 || true"

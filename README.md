@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes |
+|------------|--------------------|
+| 2026-05-21 | Documented completed Windows PowerShell, cmd, and WSL dual-entry behavior. |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -56,6 +62,7 @@ This branch adds a Windows-first install and launch flow:
 - If native HUD cannot start or exits too quickly, it automatically retries with `codex-hud-wsl`.
 - If both HUD paths are unavailable, it prints a warning and falls back to plain native `codex`.
 - `codex-hud-wsl` is the explicit full-HUD command for WSL Ubuntu.
+- `cmd.exe` users get managed `.cmd` shims that invoke the same PowerShell entrypoints with `ExecutionPolicy Bypass`.
 
 ```powershell
 git clone https://github.com/fwyc0573/codex-hud.git
@@ -73,7 +80,8 @@ codex-hud-wsl    # Explicit: full HUD in WSL (Ubuntu + tmux)
 - reinstall `@openai/codex` globally on Windows
 - install Windows native `tmux` via `winget` if needed
 - ensure Ubuntu WSL is available when possible
-- provision `nodejs`, `npm`, `tmux`, and `@openai/codex` inside WSL
+- provision WSL with `tmux`, Node.js LTS, `npm`, and `@openai/codex`
+- fail fast with exact manual WSL commands if root or passwordless `sudo` is unavailable
 
 #### PowerShell Default Path
 
@@ -98,7 +106,7 @@ Use this when you want the full Bash + tmux HUD inside WSL Ubuntu.
 
 ### Management Commands
 
-After the first install, these are available in your shell:
+After the first install, these are available in PowerShell and cmd:
 
 | Command | Description |
 |---------|-------------|
@@ -198,6 +206,7 @@ enabled = true
 | macOS (Apple Silicon) | Supported |
 | macOS (Intel) | Testing pending |
 | Windows PowerShell | Supported (default entry, native HUD first) |
+| Windows cmd | Supported (managed `.cmd` shims) |
 | Windows WSL Ubuntu | Supported (`codex-hud-wsl` full HUD entry) |
 
 ## Development
@@ -208,10 +217,13 @@ npm run dev                    # Watch mode
 node dist/index.js             # Run HUD directly
 ```
 
+On Windows PowerShell, use `npm.cmd run build` if `npm.ps1` is blocked by ExecutionPolicy.
+
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-05-21 | Complete Windows dual-entry hardening: WSL temp wrappers, sudo-based WSL provisioning, cmd shims, first-run session handling, and runtime state precedence |
 | 2026-04-20 | Make Windows PowerShell the default entry, add automatic WSL fallback, auto-install native tmux on install, and document Windows dual-mode usage |
 | 2026-04-19 | Add Windows dual-entry support (`codex` native fallback + `codex-hud-wsl` full HUD), plus PowerShell installer/sync/upgrade/uninstall |
 | 2026-04-09 | Add quick install/sync/upgrade/uninstall commands |

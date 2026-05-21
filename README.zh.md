@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes |
+|------------|--------------------|
+| 2026-05-21 | 更新 Windows PowerShell、cmd 与 WSL 双入口行为说明。 |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -144,7 +150,9 @@ enabled = true
 | Linux | 已支持 |
 | macOS (Apple Silicon) | 已支持 |
 | macOS (Intel) | 待测试 |
-| Windows | 待测试 |
+| Windows PowerShell | 已支持（默认入口，native HUD 优先） |
+| Windows cmd | 已支持（托管 `.cmd` shim） |
+| Windows WSL Ubuntu | 已支持（`codex-hud-wsl` 完整 HUD 入口） |
 
 ## 开发
 
@@ -154,10 +162,13 @@ npm run dev                    # 监听模式
 node dist/index.js             # 直接运行 HUD
 ```
 
+在 Windows PowerShell 中，如果 `npm.ps1` 被 ExecutionPolicy 阻止，请使用 `npm.cmd run build`。
+
 ## 更新日志
 
 | 日期 | 变更 |
 |------|------|
+| 2026-05-21 | 完善 Windows 双入口：WSL 临时 wrapper、sudo/root provisioning、cmd shim、首次启动 session 目录处理与 runtime state 优先级 |
 | 2026-04-09 | 新增快速安装/同步/升级/卸载命令 |
 | 2026-04-09 | HUD 按 tmux pane 绑定会话；显示 reasoning effort |
 | 2026-02-09 | 修复 resize 后主 pane 焦点漂移；优化鼠标滚动默认行为 |
@@ -171,12 +182,13 @@ MIT
 
 灵感来源于 Jarrod Watts 的 [claude-hud](https://github.com/jarrodwatts/claude-hud)。为 [OpenAI Codex CLI](https://github.com/openai/codex) 构建。
 
-## Windows 双入口说明（2026-04-19）
+## Windows 双入口说明（2026-05-21）
 
 Windows 现在支持两种启动方式：
 
-- `codex`：Windows 原生入口；如果缺少 tmux 兼容运行时，会自动降级为普通 `codex` CLI。
-- `codex-hud-wsl`：WSL 内完整 HUD 模式（Ubuntu + tmux）。
+- `codex`：默认 Windows 入口；先尝试 PowerShell native HUD，失败或快速退出后自动尝试 `codex-hud-wsl`，最后才降级为普通 native `codex` CLI。
+- `codex-hud-wsl`：显式 WSL 完整 HUD 模式（Ubuntu + Bash + tmux）。
+- `cmd.exe`：安装后会获得托管 `.cmd` shim，实际调用同一套 PowerShell entrypoint，并使用 `ExecutionPolicy Bypass`。
 
 PowerShell 安装方式：
 
@@ -186,7 +198,7 @@ cd codex-hud
 .\bin\codex-hud-install.ps1
 ```
 
-说明：`codex-hud-install.ps1` 会写入 PowerShell profile 管理块，并提供以下命令映射：
+说明：`codex-hud-install.ps1` 会写入 PowerShell profile 管理块，生成 cmd shim，并提供以下命令映射：
 
 - `codex`
 - `codex-resume`
@@ -194,3 +206,5 @@ cd codex-hud
 - `codex-hud-sync`
 - `codex-hud-upgrade`
 - `codex-hud-uninstall`
+
+安装脚本会在 Windows 上准备 Node.js、Codex CLI 与 native tmux；在 WSL 中通过 root 或 passwordless `sudo` 准备 `tmux`、Node.js LTS、`npm` 和 `@openai/codex`。如果 WSL 权限不足，会 fail fast 并输出可在 WSL 内手动执行的命令。

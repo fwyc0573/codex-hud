@@ -386,6 +386,38 @@ function Get-ProfilePath {
     return $PROFILE.CurrentUserAllHosts
 }
 
+function Get-CmdShimDirectory {
+    if ($env:CODEX_HUD_CMD_SHIM_DIR) {
+        return Resolve-NormalizedPath -Path $env:CODEX_HUD_CMD_SHIM_DIR
+    }
+
+    if (-not $env:LOCALAPPDATA) {
+        throw 'LOCALAPPDATA is required to install cmd.exe shims.'
+    }
+
+    return Join-Path $env:LOCALAPPDATA 'codex-hud\bin'
+}
+
+function Remove-CmdShims {
+    $shimDir = Get-CmdShimDirectory
+    $shimNames = @(
+        'codex.cmd',
+        'codex-resume.cmd',
+        'codex-hud-wsl.cmd',
+        'codex-hud-install.cmd',
+        'codex-hud-sync.cmd',
+        'codex-hud-upgrade.cmd',
+        'codex-hud-uninstall.cmd'
+    )
+
+    foreach ($name in $shimNames) {
+        $shimPath = Join-Path $shimDir $name
+        if (Test-Path -LiteralPath $shimPath) {
+            Remove-Item -LiteralPath $shimPath -Force
+        }
+    }
+}
+
 function Ensure-ProfileFile {
     param([Parameter(Mandatory = $true)][string]$ProfilePath)
 

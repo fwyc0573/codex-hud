@@ -103,4 +103,60 @@ assert.match(runtimeOnlyLine, /Approval: auto/, 'runtime-only fallback should su
 assert.match(runtimeOnlyLine, /Sandbox: DANGER/, 'runtime-only fallback should surface sandbox');
 assert.doesNotMatch(runtimeOnlyLine, /mode: dev/, 'runtime-only fallback should override project work mode');
 
+const runtimeOverridesSessionLine = stripAnsi(
+  renderEnvironmentLine({
+    config: {
+      model: 'gpt-5.4',
+      approval_policy: 'on-request',
+      sandbox_mode: 'workspace-write',
+    },
+    git: {
+      branch: null,
+      isDirty: false,
+      isGitRepo: false,
+      ahead: 0,
+      behind: 0,
+      modified: 0,
+      added: 0,
+      deleted: 0,
+      untracked: 0,
+    },
+    project: {
+      cwd: '/tmp/codex-hud',
+      projectName: 'codex-hud',
+      agentsMdCount: 0,
+      hasCodexDir: false,
+      instructionsMdCount: 0,
+      rulesCount: 0,
+      mcpCount: 0,
+      configsCount: 0,
+      extensionsCount: 0,
+      workMode: 'development',
+    },
+    sessionStart: new Date('2026-04-20T00:00:00Z'),
+    session: {
+      id: '019da632-9a40-7c01-bfa6-b2f069d6083f',
+      rolloutPath: '/tmp/rollout.jsonl',
+      startTime: new Date('2026-04-20T00:00:00Z'),
+      cwd: '/tmp/codex-hud',
+      cliVersion: '0.121.0',
+      approvalPolicy: 'on-request',
+      sandboxMode: 'workspace-write',
+      collaborationMode: 'default',
+    },
+    runtimeSession: {
+      collaborationMode: 'plan',
+      approvalPolicy: 'never',
+      sandboxMode: 'danger-full-access',
+    },
+  })
+);
+
+assert.match(runtimeOverridesSessionLine, /mode: plan/, 'runtime state should override stale rollout mode');
+assert.match(runtimeOverridesSessionLine, /Approval: auto/, 'runtime state should override stale rollout approval');
+assert.match(runtimeOverridesSessionLine, /Sandbox: DANGER/, 'runtime state should override stale rollout sandbox');
+assert.doesNotMatch(runtimeOverridesSessionLine, /mode: default/, 'stale rollout mode should not win over runtime state');
+assert.doesNotMatch(runtimeOverridesSessionLine, /Approval: on-req/, 'stale rollout approval should not win over runtime state');
+assert.doesNotMatch(runtimeOverridesSessionLine, /Sandbox: ws-write/, 'stale rollout sandbox should not win over runtime state');
+
 console.log('test-environment-line-runtime-state: PASS');

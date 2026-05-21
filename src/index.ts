@@ -227,7 +227,7 @@ async function collectData(): Promise<HudData> {
     configNeedsRefresh = false;
   }
 
-  const runtimeSession = !rolloutData?.session ? paneRuntimeStateCollector?.collect() ?? undefined : undefined;
+  const runtimeSession = paneRuntimeStateCollector?.collect() ?? undefined;
 
   // Build context usage from token usage if available
   // Matches codex "context window left" calculation based on last_token_usage.

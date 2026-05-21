@@ -37,7 +37,7 @@ function renderCollaborationMode(mode: string): string {
 }
 
 function renderEffectiveMode(data: HudData): string {
-  const collaborationMode = data.session?.collaborationMode ?? data.runtimeSession?.collaborationMode;
+  const collaborationMode = data.runtimeSession?.collaborationMode ?? data.session?.collaborationMode;
   if (collaborationMode) {
     return renderCollaborationMode(collaborationMode);
   }
@@ -101,12 +101,12 @@ export function renderEnvironmentLine(data: HudData): string | null {
   
   // Approval policy
   const approvalPolicy = getApprovalPolicyDisplayValue(
-    data.session?.approvalPolicy ?? data.runtimeSession?.approvalPolicy ?? data.config.approval_policy
+    data.runtimeSession?.approvalPolicy ?? data.session?.approvalPolicy ?? data.config.approval_policy
   );
   parts.push(colors.dim('Approval: ') + theme.value(approvalPolicy));
   
   // Sandbox mode (if set and not default)
-  const sandboxMode = data.session?.sandboxMode ?? data.runtimeSession?.sandboxMode ?? data.config.sandbox_mode;
+  const sandboxMode = data.runtimeSession?.sandboxMode ?? data.session?.sandboxMode ?? data.config.sandbox_mode;
   if (sandboxMode) {
     parts.push(colors.dim('Sandbox: ') + renderSandboxMode(sandboxMode));
   }

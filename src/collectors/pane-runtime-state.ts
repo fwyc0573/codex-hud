@@ -52,39 +52,62 @@ function mapPermissionLabelToRuntimeState(label: string): RuntimeSessionState | 
   }
 }
 
-function matchPermissionLabel(input: string): string | null {
-  const match = input.match(/Permissions updated to (Full Access|Workspace Write|Read Only|Read-Only)\b/i);
-  return match?.[1] ?? null;
+function findLatestPermissionLabel(input: string): string | null {
+  const candidates: Array<{ index: number; label: string }> = [];
+
+  const updateRegex = /Permissions updated to (Full Access|Workspace Write|Read Only|Read-Only)\b/gi;
+  for (const match of input.matchAll(updateRegex)) {
+    if (typeof match.index === 'number' && match[1]) {
+      candidates.push({ index: match.index, label: match[1] });
+    }
+  }
+
+  const footerRegex = /\b(Full Access|Workspace Write|Read Only|Read-Only)\s+\(shift\+tab to cycle/gi;
+  for (const match of input.matchAll(footerRegex)) {
+    if (typeof match.index === 'number' && match[1]) {
+      candidates.push({ index: match.index, label: match[1] });
+    }
+  }
+
+  candidates.sort((a, b) => a.index - b.index);
+  return candidates[candidates.length - 1]?.label ?? null;
+}
+
+function findLatestCollaborationMode(input: string): string | null {
+  const candidates: Array<{ index: number; mode: string }> = [];
+  const patterns: Array<{ regex: RegExp; mode: string }> = [
+    { regex: /\/plan\s+switch to Default mode/gi, mode: 'plan' },
+    { regex: /\bPlan mode\s+\(shift\+tab to cycle/gi, mode: 'plan' },
+    { regex: /\b(?:switched|updated)\s+to\s+Plan mode\b/gi, mode: 'plan' },
+    { regex: /\/plan\s+switch to Plan mode/gi, mode: 'default' },
+    { regex: /\bDefault mode\s+\(shift\+tab to cycle/gi, mode: 'default' },
+    { regex: /\b(?:switched|updated)\s+to\s+Default mode\b/gi, mode: 'default' },
+  ];
+
+  for (const { regex, mode } of patterns) {
+    for (const match of input.matchAll(regex)) {
+      if (typeof match.index === 'number') {
+        candidates.push({ index: match.index, mode });
+      }
+    }
+  }
+
+  candidates.sort((a, b) => a.index - b.index);
+  return candidates[candidates.length - 1]?.mode ?? null;
 }
 
 export function parsePaneRuntimeStateFromCapture(capture: string): RuntimeSessionState {
   const normalized = normalizeCapture(capture);
   const state: RuntimeSessionState = {};
 
-  const permissionLabel = matchPermissionLabel(normalized);
+  const permissionLabel = findLatestPermissionLabel(normalized);
   if (permissionLabel) {
     Object.assign(state, mapPermissionLabelToRuntimeState(permissionLabel) ?? {});
   }
 
-  const permissionFooterMatch = normalized.match(
-    /\b(Full Access|Workspace Write|Read Only|Read-Only)\s+\(shift\+tab to cycle/i
-  );
-  if (permissionFooterMatch) {
-    Object.assign(state, mapPermissionLabelToRuntimeState(permissionFooterMatch[1]) ?? {});
-  }
-
-  if (/\/plan\s+switch to Default mode/i.test(normalized)) {
-    state.collaborationMode = 'plan';
-  } else if (/\bPlan mode\s+\(shift\+tab to cycle/i.test(normalized)) {
-    state.collaborationMode = 'plan';
-  } else if (/\/plan\s+switch to Plan mode/i.test(normalized)) {
-    state.collaborationMode = 'default';
-  } else if (/\bDefault mode\s+\(shift\+tab to cycle/i.test(normalized)) {
-    state.collaborationMode = 'default';
-  } else if (/\b(?:switched|updated)\s+to\s+Plan mode\b/i.test(normalized)) {
-    state.collaborationMode = 'plan';
-  } else if (/\b(?:switched|updated)\s+to\s+Default mode\b/i.test(normalized)) {
-    state.collaborationMode = 'default';
+  const collaborationMode = findLatestCollaborationMode(normalized);
+  if (collaborationMode) {
+    state.collaborationMode = collaborationMode;
   }
 
   return state;

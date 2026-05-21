@@ -10,6 +10,8 @@ $gitLog = Join-Path $tempRoot 'git-command.txt'
 $profilePath = Join-Path $tempRoot 'profile.ps1'
 $tmuxLog = Join-Path $tempRoot 'tmux-log.txt'
 $tmuxState = Join-Path $tempRoot 'tmux-session.txt'
+$localAppData = Join-Path $tempRoot 'local-app-data'
+$cmdShimDir = Join-Path $localAppData 'codex-hud\bin'
 
 New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
 
@@ -41,6 +43,8 @@ $originalSkipHud = $env:CODEX_HUD_SKIP_NATIVE_HUD
 $originalWslCommand = $env:CODEX_HUD_WSL_COMMAND
 $originalProfile = $env:CODEX_HUD_PROFILE_PATH
 $originalSkipReinstall = $env:CODEX_HUD_SKIP_CLI_REINSTALL
+$originalSkipWindowsReinstall = $env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL
+$originalSkipWslReinstall = $env:CODEX_HUD_SKIP_WSL_CLI_REINSTALL
 $originalSkipWsl = $env:CODEX_HUD_SKIP_WSL_SETUP
 $originalSkipBuild = $env:CODEX_HUD_SKIP_BUILD
 $originalSkipNativeTmux = $env:CODEX_HUD_SKIP_NATIVE_TMUX_SETUP
@@ -55,6 +59,7 @@ $originalTmuxState = $env:CODEX_HUD_TEST_TMUX_STATE
 $originalTmuxAttachMode = $env:CODEX_HUD_TEST_TMUX_ATTACH_MODE
 $originalTerm = $env:TERM
 $originalColorTerm = $env:COLORTERM
+$originalLocalAppData = $env:LOCALAPPDATA
 
 try {
     $fakeCodexCmd = Join-Path $fakeBin 'codex.cmd'
@@ -76,32 +81,49 @@ if "%1"=="pull" exit /b 0
 exit /b 0
 "@ | Set-Content -Path $fakeGitCmd -Encoding ascii
 
-    $fakeWslCmd = Join-Path $tempRoot 'fake-wsl.cmd'
+    $fakeWslCmd = Join-Path $tempRoot 'fake-wsl.ps1'
     @"
-@echo off
-setlocal
-
-if "%1"=="--list" if "%2"=="--quiet" (
-  echo Ubuntu
-  exit /b 0
+param(
+    [Parameter(ValueFromRemainingArguments = `$true)]
+    [string[]]`$WslArgs
 )
 
-if "%1"=="-d" if "%3"=="--" if "%4"=="wslpath" if "%5"=="-a" (
-  echo /mnt/c/repo/bin/codex-hud
-  exit /b 0
-)
+if (`$WslArgs.Count -ge 2 -and `$WslArgs[0] -eq '--list' -and `$WslArgs[1] -eq '--quiet') {
+    Write-Output 'Ubuntu'
+    exit 0
+}
 
-if "%1"=="-d" if "%3"=="--" if "%4"=="bash" if "%5"=="-lc" (
-  >"%CODEX_HUD_TEST_WSL_LOG%" echo %*
-  exit /b 0
-)
+if (`$WslArgs -contains 'wslpath' -and `$WslArgs -contains '-a') {
+    `$leaf = Split-Path -Leaf `$WslArgs[`$WslArgs.Count - 1]
+    if (`$leaf -eq 'codex-hud-resize') {
+        Write-Output '/mnt/c/repo/bin/codex-hud-resize'
+        exit 0
+    }
+    if (`$leaf -eq 'codex-hud') {
+        Write-Output '/mnt/c/repo/bin/codex-hud'
+        exit 0
+    }
+    if (`$leaf -eq 'bin') {
+        Write-Output '/mnt/c/repo/bin'
+        exit 0
+    }
 
->>"%CODEX_HUD_TEST_WSL_LOG%" echo unexpected:%*
-exit /b 1
+    Write-Output '/mnt/c/repo'
+    exit 0
+}
+
+if (`$WslArgs -contains 'bash' -and `$WslArgs -contains '-lc') {
+    Set-Content -Path `$env:CODEX_HUD_TEST_WSL_LOG -Value (`$WslArgs -join ' ') -Encoding utf8
+    exit 0
+}
+
+Add-Content -Path `$env:CODEX_HUD_TEST_WSL_LOG -Value ('unexpected:' + (`$WslArgs -join ' ')) -Encoding utf8
+exit 1
 "@ | Set-Content -Path $fakeWslCmd -Encoding ascii
 
     $env:Path = "$fakeBin;$env:Path"
     $env:CODEX_HUD_REAL_CODEX = $null
+    $env:LOCALAPPDATA = $localAppData
 
     # Test 1: native wrapper falls back to codex and forwards args.
     $env:CODEX_HUD_SKIP_NATIVE_HUD = '1'
@@ -116,12 +138,16 @@ exit /b 1
     $env:CODEX_HUD_WSL_COMMAND = $fakeWslCmd
     $env:CODEX_HUD_TEST_WSL_LOG = $wslLog
 
-    & (Join-Path $repoRoot 'bin\codex-hud-wsl.ps1') --model gpt-5
+    & (Join-Path $repoRoot 'bin\codex-hud-wsl.ps1') --model 'gpt 5' "quote's test" -- 'literal value'
     Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'codex-hud-wsl.ps1 should exit 0 with fake wsl'
 
     $wslCommand = (Get-Content -Path $wslLog -Raw)
-    Assert-Contains -Text $wslCommand -Needle '/mnt/c/repo/bin/codex-hud' -Message 'wsl command should target bash wrapper path'
+    Assert-Contains -Text $wslCommand -Needle 'mktemp -d' -Message 'wsl command should create temp files under WSL /tmp'
+    Assert-Contains -Text $wslCommand -Needle "CODEX_HUD_SCRIPT_DIR='/mnt/c/repo/bin'" -Message 'wsl command should keep repo script dir separate from temp wrapper'
     Assert-Contains -Text $wslCommand -Needle 'CODEX_HUD_RESIZE_HELPER=' -Message 'wsl command should set resize helper for LF-safe execution'
+    $escapedQuoteArg = [string][char]39 + 'quote' + [string][char]39 + [string][char]34 + [string][char]39 + [string][char]34 + [string][char]39 + 's test' + [string][char]39
+    Assert-Contains -Text $wslCommand -Needle $escapedQuoteArg -Message 'wsl command should preserve single quotes in CLI args'
+    Assert-True -Condition (-not $wslCommand.Contains('.wsltmp')) -Message 'wsl command should not create repo-local .wsltmp files'
 
     # Test 3: native wrapper should bootstrap a tmux-safe terminal type and restore env afterward.
     $nativeTermLog = Join-Path $tempRoot 'native-term.txt'
@@ -260,9 +286,31 @@ exit /b 0
     Remove-Item Env:CODEX_HUD_TEST_TMUX_STATE -ErrorAction SilentlyContinue
     Remove-Item Env:CODEX_HUD_TEST_TMUX_ATTACH_MODE -ErrorAction SilentlyContinue
 
-    # Test 4: install/sync/upgrade/uninstall should manage profile marker block and wrappers.
+    # Test 4: WSL provisioning should use sudo/root checks and Node LTS setup.
+    Remove-Item -LiteralPath $wslLog -Force -ErrorAction SilentlyContinue
+    $env:CODEX_HUD_PROFILE_PATH = $profilePath
+    $env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL = '1'
+    Remove-Item Env:CODEX_HUD_SKIP_CLI_REINSTALL -ErrorAction SilentlyContinue
+    Remove-Item Env:CODEX_HUD_SKIP_WSL_CLI_REINSTALL -ErrorAction SilentlyContinue
+    Remove-Item Env:CODEX_HUD_SKIP_WSL_SETUP -ErrorAction SilentlyContinue
+    $env:CODEX_HUD_SKIP_BUILD = '1'
+    $env:CODEX_HUD_SKIP_NATIVE_TMUX_SETUP = '1'
+    $env:CODEX_HUD_WSL_COMMAND = $fakeWslCmd
+    $env:CODEX_HUD_TEST_REAL_CODEX = $fakeCodexCmd
+
+    & (Join-Path $repoRoot 'bin\codex-hud-install.ps1') -Mode install
+    Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'codex-hud-install.ps1 should provision WSL with fake wsl'
+
+    $provisionCommand = Get-Content -Path $wslLog -Raw
+    Assert-Contains -Text $provisionCommand -Needle 'sudo -n true' -Message 'WSL provisioning should verify passwordless sudo when not root'
+    Assert-Contains -Text $provisionCommand -Needle 'https://deb.nodesource.com/setup_lts.x' -Message 'WSL provisioning should install Node.js LTS when needed'
+    Assert-Contains -Text $provisionCommand -Needle 'node --version' -Message 'WSL provisioning should validate Node version'
+    Assert-Contains -Text $provisionCommand -Needle 'npm install -g @openai/codex@latest' -Message 'WSL provisioning should reinstall codex-cli in WSL'
+
+    # Test 5: install/sync/upgrade/uninstall should manage profile marker block and wrappers.
     $env:CODEX_HUD_PROFILE_PATH = $profilePath
     $env:CODEX_HUD_SKIP_CLI_REINSTALL = '1'
+    Remove-Item Env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL -ErrorAction SilentlyContinue
     $env:CODEX_HUD_SKIP_WSL_SETUP = '1'
     $env:CODEX_HUD_SKIP_BUILD = '1'
     $env:CODEX_HUD_SKIP_NATIVE_TMUX_SETUP = '1'
@@ -272,8 +320,24 @@ exit /b 0
     Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'codex-hud-install.ps1 should exit 0 in test mode'
 
     $profileContent = Get-Content -Path $profilePath -Raw
-    Assert-Contains -Text $profileContent -Needle '# >>> codex-hud windows >>>' -Message 'install should add profile marker start'
+    $profileMarkerStart = '# ' + '>>>' + ' codex-hud windows ' + '>>>'
+    Assert-Contains -Text $profileContent -Needle $profileMarkerStart -Message 'install should add profile marker start'
     Assert-Contains -Text $profileContent -Needle 'function codex-hud-wsl' -Message 'install should add codex-hud-wsl alias function'
+
+    $cmdShim = Join-Path $cmdShimDir 'codex.cmd'
+    Assert-True -Condition (Test-Path -LiteralPath $cmdShim) -Message 'install should create codex.cmd shim for cmd.exe users'
+    $cmdShimContent = Get-Content -Path $cmdShim -Raw
+    Assert-Contains -Text $cmdShimContent -Needle 'codex-hud.ps1' -Message 'codex.cmd shim should invoke the PowerShell entrypoint'
+    Assert-Contains -Text $cmdShimContent -Needle 'CODEX_HUD_REAL_CODEX' -Message 'codex.cmd shim should pin the real codex executable'
+
+    Remove-Item -LiteralPath $codexArgsLog -Force -ErrorAction SilentlyContinue
+    $env:CODEX_HUD_SKIP_NATIVE_HUD = '1'
+    $env:CODEX_HUD_WSL_COMMAND = 'Z:\missing\wsl.exe'
+    $cmdExe = if ($env:ComSpec) { $env:ComSpec } else { (Join-Path $env:WINDIR 'System32\cmd.exe') }
+    & $cmdExe /d /c "`"$cmdShim`" cmd-shim-test"
+    Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'codex.cmd shim should be executable from cmd.exe'
+    $cmdShimArgs = (Get-Content -Path $codexArgsLog -Raw).Trim()
+    Assert-Contains -Text $cmdShimArgs -Needle 'cmd-shim-test' -Message 'codex.cmd shim should preserve CLI args'
 
     & (Join-Path $repoRoot 'bin\codex-hud-sync.ps1')
     Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'codex-hud-sync.ps1 should exit 0'
@@ -292,7 +356,8 @@ exit /b 0
     if ($null -eq $profileAfter) {
         $profileAfter = ''
     }
-    Assert-True -Condition (-not $profileAfter.Contains('# >>> codex-hud windows >>>')) -Message 'uninstall should remove managed profile block'
+    Assert-True -Condition (-not $profileAfter.Contains($profileMarkerStart)) -Message 'uninstall should remove managed profile block'
+    Assert-True -Condition (-not (Test-Path -LiteralPath $cmdShim)) -Message 'uninstall should remove managed cmd shim'
 
     Write-Host 'test-powershell-entrypoints: PASS'
 } finally {
@@ -301,6 +366,8 @@ exit /b 0
     $env:CODEX_HUD_WSL_COMMAND = $originalWslCommand
     $env:CODEX_HUD_PROFILE_PATH = $originalProfile
     $env:CODEX_HUD_SKIP_CLI_REINSTALL = $originalSkipReinstall
+    $env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL = $originalSkipWindowsReinstall
+    $env:CODEX_HUD_SKIP_WSL_CLI_REINSTALL = $originalSkipWslReinstall
     $env:CODEX_HUD_SKIP_WSL_SETUP = $originalSkipWsl
     $env:CODEX_HUD_SKIP_BUILD = $originalSkipBuild
     $env:CODEX_HUD_SKIP_NATIVE_TMUX_SETUP = $originalSkipNativeTmux
@@ -315,6 +382,7 @@ exit /b 0
     $env:CODEX_HUD_TEST_TMUX_ATTACH_MODE = $originalTmuxAttachMode
     $env:TERM = $originalTerm
     $env:COLORTERM = $originalColorTerm
+    $env:LOCALAPPDATA = $originalLocalAppData
 
     if ($null -eq $originalColorTerm) {
         Remove-Item Env:COLORTERM -ErrorAction SilentlyContinue

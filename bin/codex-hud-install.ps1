@@ -66,6 +66,10 @@ function Reinstall-WindowsCodex {
         Write-Warn 'Skipping Windows codex-cli reinstall due to CODEX_HUD_SKIP_CLI_REINSTALL=1.'
         return
     }
+    if ($env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL -eq '1') {
+        Write-Warn 'Skipping Windows codex-cli reinstall due to CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL=1.'
+        return
+    }
 
     Write-Info 'Reinstalling codex-cli on Windows (npm global)...'
     [void](Invoke-NpmCli -NodeExecutable $NodeExecutable -NpmArguments @('uninstall', '-g', '@openai/codex'))
@@ -155,6 +159,10 @@ function Reinstall-WslCodex {
         Write-Warn 'Skipping WSL codex-cli reinstall due to CODEX_HUD_SKIP_CLI_REINSTALL=1.'
         return
     }
+    if ($env:CODEX_HUD_SKIP_WSL_CLI_REINSTALL -eq '1') {
+        Write-Warn 'Skipping WSL codex-cli reinstall due to CODEX_HUD_SKIP_WSL_CLI_REINSTALL=1.'
+        return
+    }
 
     if (-not $global:WslReady) {
         Write-Warn 'WSL distro not ready; skipping WSL codex-cli reinstall for now.'
@@ -170,16 +178,26 @@ function Reinstall-WslCodex {
     Write-Info 'Installing nodejs/npm/tmux in WSL and reinstalling codex-cli...'
     $cmd = @(
         'set -euo pipefail',
-        'apt-get update',
-        'DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm tmux',
-        'npm uninstall -g @openai/codex || true',
-        'npm install -g @openai/codex@latest',
+        'manual_cmd="sudo apt-get update && sudo apt-get install -y ca-certificates curl tmux && curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs && sudo npm install -g @openai/codex@latest"',
+        'if [ "$(id -u)" -eq 0 ]; then SUDO_CMD=""; elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then SUDO_CMD="sudo"; else echo "codex-hud WSL provisioning requires root or passwordless sudo." >&2; echo "Run inside WSL: $manual_cmd" >&2; exit 70; fi',
+        'run_root() { if [ -n "$SUDO_CMD" ]; then sudo "$@"; else "$@"; fi; }',
+        'run_root_env() { if [ -n "$SUDO_CMD" ]; then sudo -E "$@"; else "$@"; fi; }',
+        'get_node_major() { node --version 2>/dev/null | sed -E "s/^v([0-9]+).*/\1/" || true; }',
+        'run_root apt-get update',
+        'run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tmux',
+        'node_major="$(get_node_major)"',
+        'if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then curl -fsSL https://deb.nodesource.com/setup_lts.x | run_root_env bash -; run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs; fi',
+        'node_major="$(get_node_major)"',
+        'if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then echo "Node.js >=18 is required in WSL after provisioning." >&2; exit 71; fi',
+        'command -v npm >/dev/null 2>&1 || { echo "npm is required in WSL after provisioning." >&2; exit 72; }',
+        'run_root npm uninstall -g @openai/codex || true',
+        'run_root npm install -g @openai/codex@latest',
         'codex --version'
     ) -join '; '
 
     & $wsl -d $distro -- bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'Failed to provision WSL codex-cli automatically; run setup manually inside WSL.'
+        throw 'Failed to provision WSL codex-cli automatically. See the WSL output above for root cause and manual commands.'
     }
 }
 
@@ -263,6 +281,101 @@ function codex-hud-uninstall { & `$codexHudUninstallPath @args }
     return $body
 }
 
+function Assert-CmdShimValueSafe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    if ($Value.Contains('"')) {
+        throw "$Name contains a double quote, which cannot be safely represented in a cmd shim: $Value"
+    }
+}
+
+function Write-CmdShim {
+    param(
+        [Parameter(Mandatory = $true)][string]$ShimPath,
+        [Parameter(Mandatory = $true)][string]$TargetScript,
+        [Parameter(Mandatory = $true)][string]$RealCodexPath,
+        [string[]]$PrefixArgs = @()
+    )
+
+    $resolvedScript = Resolve-NormalizedPath -Path $TargetScript
+    $resolvedCodex = Resolve-NormalizedPath -Path $RealCodexPath
+    Assert-CmdShimValueSafe -Name 'TargetScript' -Value $resolvedScript
+    Assert-CmdShimValueSafe -Name 'RealCodexPath' -Value $resolvedCodex
+
+    $prefix = ''
+    if ($PrefixArgs -and $PrefixArgs.Count -gt 0) {
+        foreach ($arg in $PrefixArgs) {
+            Assert-CmdShimValueSafe -Name 'PrefixArg' -Value $arg
+        }
+        $prefix = ' ' + (($PrefixArgs | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    }
+
+    $content = @"
+@echo off
+setlocal
+set "CODEX_HUD_REAL_CODEX=$resolvedCodex"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$resolvedScript"$prefix %*
+exit /b %ERRORLEVEL%
+"@
+
+    Set-Content -Path $ShimPath -Value $content -Encoding ascii
+}
+
+function Install-CmdShims {
+    param([Parameter(Mandatory = $true)][string]$RealCodexPath)
+
+    $shimDir = Get-CmdShimDirectory
+    if (-not (Test-Path -LiteralPath $shimDir)) {
+        New-Item -ItemType Directory -Path $shimDir -Force | Out-Null
+    }
+
+    $scripts = @{
+        'codex.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud.ps1'
+            Args = @()
+        }
+        'codex-resume.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud.ps1'
+            Args = @('resume')
+        }
+        'codex-hud-wsl.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud-wsl.ps1'
+            Args = @()
+        }
+        'codex-hud-install.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud-install.ps1'
+            Args = @()
+        }
+        'codex-hud-sync.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud-sync.ps1'
+            Args = @()
+        }
+        'codex-hud-upgrade.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud-upgrade.ps1'
+            Args = @()
+        }
+        'codex-hud-uninstall.cmd' = @{
+            Target = Join-Path $PSScriptRoot 'codex-hud-uninstall.ps1'
+            Args = @()
+        }
+    }
+
+    foreach ($name in @($scripts.Keys)) {
+        $shimPath = Join-Path $shimDir $name
+        Write-CmdShim -ShimPath $shimPath -TargetScript $scripts[$name].Target -RealCodexPath $RealCodexPath -PrefixArgs $scripts[$name].Args
+    }
+
+    Ensure-UserPathStartsWith -PathEntry $shimDir
+    if (-not $env:Path.Split(';').Where({ $_.TrimEnd('\').Equals($shimDir.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase) }, 'First').Count) {
+        $env:Path = "$shimDir;$env:Path"
+    }
+
+    return $shimDir
+}
+
 function Upgrade-Checkout {
     $git = Get-GitCommand
     if (-not $git) {
@@ -322,8 +435,10 @@ if (-not $realCodex) {
 $profilePath = Get-ProfilePath
 $profileBlock = Build-ProfileBlock -NpmPrefix $npmPrefix -RealCodexPath (Resolve-NormalizedPath -Path $realCodex.Source) -WindowsTmuxPath $windowsTmux
 Set-ManagedProfileBlock -ProfilePath $profilePath -BlockBody $profileBlock
+$cmdShimDir = Install-CmdShims -RealCodexPath (Resolve-NormalizedPath -Path $realCodex.Source)
 
 Write-Info "Profile updated: $profilePath"
+Write-Info "cmd.exe shims updated: $cmdShimDir"
 Write-Info 'Open a new PowerShell session (or reload your profile) to use codex-hud aliases.'
 
 if (-not $global:WslReady) {

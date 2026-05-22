@@ -9,6 +9,10 @@
 
 [OpenAI Codex CLI](https://github.com/openai/codex) 的实时状态栏 HUD。轻量、零配置、在 tmux 中运行。
 
+## Windows WSL 支持
+
+Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu WSL 提供。macOS/Linux 用户使用 `main`；Windows (WSL) 用户使用该 feature branch。
+
 > 灵感来源于 Claude Code 的 [claude-hud](https://github.com/jarrodwatts/claude-hud)。
 
 ![Codex HUD — 单 Session 模式](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
@@ -37,12 +41,30 @@
 
 ## 快速开始
 
+### macOS/Linux（`main`）
+
 ```bash
 git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
+git switch main
 ./bin/codex-hud-install
 
 # 刷新 shell，然后直接输入：
+codex
+```
+
+### Windows (WSL)（`feature/windows-support-dual-entry`）
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+
+# 打开新的 PowerShell 或 cmd 窗口，然后检查：
+codex --self-check
+
+# 使用 WSL HUD 启动：
 codex
 ```
 
@@ -144,7 +166,7 @@ enabled = true
 | Linux | 已支持 |
 | macOS (Apple Silicon) | 已支持 |
 | macOS (Intel) | 待测试 |
-| Windows | 待测试 |
+| Windows (WSL) | 已在 `feature/windows-support-dual-entry` 支持 |
 
 ## 开发
 

@@ -9,6 +9,10 @@
 
 Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex). Lightweight, zero-config, works inside tmux.
 
+## Windows WSL Support
+
+Windows support is available through Ubuntu WSL on the `feature/windows-support-dual-entry` branch. Use `main` for macOS/Linux, and use that feature branch for Windows (WSL).
+
 > Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.
 
 ![Codex HUD — Single Session](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
@@ -37,12 +41,30 @@ No. Codex HUD auto-activates tmux for you. Just type `codex` and the HUD appears
 
 ## Quick Start
 
+### macOS/Linux (`main`)
+
 ```bash
 git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
+git switch main
 ./bin/codex-hud-install
 
 # Refresh your shell, then just type:
+codex
+```
+
+### Windows (WSL) (`feature/windows-support-dual-entry`)
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+
+# Open a new PowerShell or cmd window, then check:
+codex --self-check
+
+# Run with the WSL HUD:
 codex
 ```
 
@@ -143,7 +165,7 @@ enabled = true
 | Linux | Supported |
 | macOS (Apple Silicon) | Supported |
 | macOS (Intel) | Testing pending |
-| Windows | Testing pending |
+| Windows (WSL) | Supported on `feature/windows-support-dual-entry` |
 
 ## Development
 

@@ -9,6 +9,10 @@
 
 [OpenAI Codex CLI](https://github.com/openai/codex) 用のリアルタイムステータスバー HUD。軽量・設定不要・tmux 内で動作。
 
+## Windows WSL サポート
+
+Windows サポートは Ubuntu WSL 経由で `feature/windows-support-dual-entry` branch に用意されています。macOS/Linux では `main`、Windows (WSL) ではその feature branch を使用してください。
+
 > Claude Code の [claude-hud](https://github.com/jarrodwatts/claude-hud) にインスパイアされています。
 
 ![Codex HUD — シングルセッション](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
@@ -37,12 +41,30 @@
 
 ## クイックスタート
 
+### macOS/Linux（`main`）
+
 ```bash
 git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
+git switch main
 ./bin/codex-hud-install
 
 # シェルをリフレッシュして、以下を入力：
+codex
+```
+
+### Windows (WSL)（`feature/windows-support-dual-entry`）
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+
+# 新しい PowerShell または cmd ウィンドウを開いて確認：
+codex --self-check
+
+# WSL HUD で起動：
 codex
 ```
 
@@ -144,7 +166,7 @@ enabled = true
 | Linux | 対応済み |
 | macOS (Apple Silicon) | 対応済み |
 | macOS (Intel) | テスト待ち |
-| Windows | テスト待ち |
+| Windows (WSL) | `feature/windows-support-dual-entry` で対応済み |
 
 ## 開発
 

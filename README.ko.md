@@ -9,6 +9,10 @@
 
 [OpenAI Codex CLI](https://github.com/openai/codex)를 위한 실시간 상태 표시줄 HUD. 경량, 무설정, tmux 내 동작.
 
+## Windows WSL 지원
+
+Windows 지원은 Ubuntu WSL을 통해 `feature/windows-support-dual-entry` branch에서 제공됩니다. macOS/Linux 사용자는 `main`을, Windows (WSL) 사용자는 해당 feature branch를 사용하세요.
+
 > Claude Code의 [claude-hud](https://github.com/jarrodwatts/claude-hud)에서 영감을 받았습니다.
 
 ![Codex HUD — 단일 세션](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
@@ -37,12 +41,30 @@
 
 ## 빠른 시작
 
+### macOS/Linux (`main`)
+
 ```bash
 git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
+git switch main
 ./bin/codex-hud-install
 
 # 셸을 새로고침한 후 입력:
+codex
+```
+
+### Windows (WSL) (`feature/windows-support-dual-entry`)
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+
+# 새 PowerShell 또는 cmd 창을 열고 확인:
+codex --self-check
+
+# WSL HUD로 실행:
 codex
 ```
 
@@ -144,7 +166,7 @@ enabled = true
 | Linux | 지원됨 |
 | macOS (Apple Silicon) | 지원됨 |
 | macOS (Intel) | 테스트 대기 |
-| Windows | 테스트 대기 |
+| Windows (WSL) | `feature/windows-support-dual-entry`에서 지원됨 |
 
 ## 개발
 

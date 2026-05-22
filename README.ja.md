@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes |
+|------------|--------------------|
+| 2026-05-22 | Windows ユーザー向けに current branch のダウンロード、self-check、WSL 起動手順とスクリーンショットを追加。 |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -45,6 +51,43 @@ cd codex-hud
 # シェルをリフレッシュして、以下を入力：
 codex
 ```
+
+### Windows current branch（WSL デフォルト）
+
+この branch では、Windows のサポート対象 HUD runtime は WSL です。PowerShell と cmd はランチャー shell として使い、HUD 本体は Ubuntu WSL の Bash + tmux で動作します。
+
+1. ダウンロードして current branch に切り替えます：
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+```
+
+2. 新しい PowerShell または cmd ウィンドウを開き、WSL runtime を確認します：
+
+```powershell
+codex --self-check
+```
+
+![Windows WSL self-check](./doc/fig/wsl-self-check.png)
+
+3. Codex HUD を起動します：
+
+```powershell
+codex
+```
+
+![Windows WSL launch](./doc/fig/windows-wsl.png)
+
+Notes:
+
+- `codex` は Windows ではデフォルトで WSL HUD を起動します。
+- `codex --wsl ...` は同じ WSL HUD パスを明示的に選択し、Codex CLI に渡す前に wrapper 引数を取り除きます。
+- native PowerShell HUD は現在、ユーザー向け起動モードとしては未サポートです。legacy native-mode request は fail fast し、WSL HUD の使用を案内します。
+- `codex-hud-wsl` は Ubuntu WSL で完全な HUD を起動する明示コマンドです。
+- `cmd.exe` ユーザーには、同じ PowerShell entrypoint を呼び出す管理済み `.cmd` shim が提供されます。
 
 ### 管理コマンド
 
@@ -144,7 +187,9 @@ enabled = true
 | Linux | 対応済み |
 | macOS (Apple Silicon) | 対応済み |
 | macOS (Intel) | テスト待ち |
-| Windows | テスト待ち |
+| Windows PowerShell | ランチャー shell として対応、native PowerShell HUD は未サポート |
+| Windows cmd | 管理済み `.cmd` shim で対応 |
+| Windows WSL Ubuntu | Windows のデフォルト HUD パスとして対応 |
 
 ## 開発
 
@@ -158,6 +203,7 @@ node dist/index.js             # HUD を直接実行
 
 | 日付 | 変更内容 |
 |------|----------|
+| 2026-05-22 | Windows current branch の WSL download/self-check/run 手順とスクリーンショットを追加 |
 | 2026-04-09 | クイックインストール/同期/アップグレード/アンインストールコマンドを追加 |
 | 2026-04-09 | HUD セッションを tmux ペインにバインド、reasoning effort を表示 |
 | 2026-02-09 | リサイズ後のメインペインフォーカス修正、マウススクロールのデフォルト改善 |

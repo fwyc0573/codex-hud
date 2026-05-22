@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes |
+|------------|--------------------|
+| 2026-05-22 | Windows 사용자를 위한 current branch 다운로드, self-check, WSL 실행 절차와 스크린샷을 추가. |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -45,6 +51,43 @@ cd codex-hud
 # 셸을 새로고침한 후 입력:
 codex
 ```
+
+### Windows current branch (WSL 기본값)
+
+이 branch에서 Windows의 지원 HUD runtime은 WSL입니다. PowerShell과 cmd는 launcher shell로 사용되며, HUD 자체는 Ubuntu WSL의 Bash + tmux 안에서 실행됩니다.
+
+1. 다운로드하고 current branch로 전환합니다:
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+```
+
+2. 새 PowerShell 또는 cmd 창을 열고 WSL runtime을 확인합니다:
+
+```powershell
+codex --self-check
+```
+
+![Windows WSL self-check](./doc/fig/wsl-self-check.png)
+
+3. Codex HUD를 실행합니다:
+
+```powershell
+codex
+```
+
+![Windows WSL launch](./doc/fig/windows-wsl.png)
+
+Notes:
+
+- `codex`는 Windows에서 기본적으로 WSL HUD를 실행합니다.
+- `codex --wsl ...`은 같은 WSL HUD 경로를 명시적으로 선택하며, Codex CLI로 전달하기 전에 wrapper 인수를 제거합니다.
+- native PowerShell HUD는 현재 사용자 실행 모드로 지원되지 않습니다. legacy native-mode request는 fail fast 하며 WSL HUD 사용을 안내합니다.
+- `codex-hud-wsl`은 Ubuntu WSL에서 전체 HUD를 실행하는 명시적 명령입니다.
+- `cmd.exe` 사용자는 동일한 PowerShell entrypoint를 호출하는 관리형 `.cmd` shim을 받습니다.
 
 ### 관리 명령어
 
@@ -144,7 +187,9 @@ enabled = true
 | Linux | 지원됨 |
 | macOS (Apple Silicon) | 지원됨 |
 | macOS (Intel) | 테스트 대기 |
-| Windows | 테스트 대기 |
+| Windows PowerShell | launcher shell로 지원, native PowerShell HUD는 미지원 |
+| Windows cmd | 관리형 `.cmd` shim으로 지원 |
+| Windows WSL Ubuntu | Windows 기본 HUD 경로로 지원 |
 
 ## 개발
 
@@ -158,6 +203,7 @@ node dist/index.js             # HUD 직접 실행
 
 | 날짜 | 변경 사항 |
 |------|-----------|
+| 2026-05-22 | Windows current branch의 WSL download/self-check/run 절차와 스크린샷 추가 |
 | 2026-04-09 | 빠른 설치/동기화/업그레이드/제거 명령어 추가 |
 | 2026-04-09 | HUD 세션을 tmux 패인에 바인딩; reasoning effort 표시 |
 | 2026-02-09 | 리사이즈 후 메인 패인 포커스 수정; 마우스 스크롤 기본값 개선 |

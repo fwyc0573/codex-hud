@@ -2,6 +2,9 @@
 
 | Date       | Summary of Changes |
 |------------|--------------------|
+| 2026-05-22 | 补充 Windows 用户当前 branch 下载、self-check、运行流程，并加入 WSL 截图。 |
+| 2026-05-22 | 将 Windows 默认启动策略切换为 WSL-only，并标注 native PowerShell HUD 暂未支持。 |
+| 2026-05-22 | 记录 Windows 显式启动模式参数与 Bash installer 依赖诊断提示。 |
 | 2026-05-21 | 更新 Windows PowerShell、cmd 与 WSL 双入口行为说明。 |
 
 <p align="center">
@@ -52,6 +55,43 @@ cd codex-hud
 codex
 ```
 
+### Windows 当前 branch（默认 WSL）
+
+当前 branch 在 Windows 上只把 WSL HUD 作为受支持的 HUD 运行时。PowerShell 和 cmd 只是启动 shell；HUD 本身会在 Ubuntu WSL 的 Bash + tmux 中运行。
+
+1. 下载并切换到当前 branch：
+
+```powershell
+git clone https://github.com/fwyc0573/codex-hud.git
+cd codex-hud
+git switch feature/windows-support-dual-entry
+.\bin\codex-hud-install.ps1
+```
+
+2. 打开新的 PowerShell 或 cmd 窗口，然后检查 WSL runtime：
+
+```powershell
+codex --self-check
+```
+
+![Windows WSL self-check](./doc/fig/wsl-self-check.png)
+
+3. 启动 Codex HUD：
+
+```powershell
+codex
+```
+
+![Windows WSL launch](./doc/fig/windows-wsl.png)
+
+说明：
+
+- `codex` 在 Windows 上默认启动 WSL HUD。
+- `codex --wsl ...` 显式使用同一条 WSL HUD 路径，并在转发给 Codex CLI 前移除 wrapper 参数。
+- native PowerShell HUD 暂未作为用户启动模式支持；legacy native-mode 请求会 fail fast 并提示使用 WSL HUD。
+- `codex-hud-wsl` 是显式 WSL 完整 HUD 命令。
+- `cmd.exe` 用户会获得托管 `.cmd` shim，并通过同一套 PowerShell entrypoint 启动。
+
 ### 管理命令
 
 首次安装后，以下命令自动加入 shell：
@@ -85,6 +125,7 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ```bash
 codex                        # 启动并自动显示 HUD
 codex --model gpt-5          # 传递 Codex CLI 参数
+codex --wsl --model gpt-5    # Windows 下显式使用 WSL HUD
 codex "help me debug this"   # 带初始提示
 codex-resume                 # 恢复上次会话
 ```
@@ -150,9 +191,9 @@ enabled = true
 | Linux | 已支持 |
 | macOS (Apple Silicon) | 已支持 |
 | macOS (Intel) | 待测试 |
-| Windows PowerShell | 已支持（默认入口，native HUD 优先） |
+| Windows PowerShell | 已支持为启动 shell；native PowerShell HUD 暂未支持 |
 | Windows cmd | 已支持（托管 `.cmd` shim） |
-| Windows WSL Ubuntu | 已支持（`codex-hud-wsl` 完整 HUD 入口） |
+| Windows WSL Ubuntu | 已支持（Windows 默认 HUD 路径与 `codex-hud-wsl` 完整 HUD 入口） |
 
 ## 开发
 
@@ -168,6 +209,8 @@ node dist/index.js             # 直接运行 HUD
 
 | 日期 | 变更 |
 |------|------|
+| 2026-05-22 | 将 Windows 默认启动策略切换为仅使用 WSL HUD；显式 native PowerShell HUD 参数会 fail fast 并提示暂未支持 |
+| 2026-05-22 | 新增 Windows 启动模式解析实验、native 到 WSL 的醒目 fallback 提示，以及 Bash installer 的精确依赖安装指导 |
 | 2026-05-21 | 完善 Windows 双入口：WSL 临时 wrapper、sudo/root provisioning、cmd shim、首次启动 session 目录处理与 runtime state 优先级 |
 | 2026-04-09 | 新增快速安装/同步/升级/卸载命令 |
 | 2026-04-09 | HUD 按 tmux pane 绑定会话；显示 reasoning effort |
@@ -182,11 +225,13 @@ MIT
 
 灵感来源于 Jarrod Watts 的 [claude-hud](https://github.com/jarrodwatts/claude-hud)。为 [OpenAI Codex CLI](https://github.com/openai/codex) 构建。
 
-## Windows 双入口说明（2026-05-21）
+## Windows WSL 默认入口说明（2026-05-22）
 
-Windows 现在支持两种启动方式：
+Windows 当前默认只使用 WSL HUD 启动路径：
 
-- `codex`：默认 Windows 入口；先尝试 PowerShell native HUD，失败或快速退出后自动尝试 `codex-hud-wsl`，最后才降级为普通 native `codex` CLI。
+- `codex`：默认 Windows 入口；直接启动 WSL HUD，WSL HUD 不可用时才降级为普通 Windows `codex` CLI。
+- `codex --wsl ...`：显式使用 WSL HUD，并在转发给 Codex CLI 前移除 wrapper 参数。
+- legacy native-mode 请求：native PowerShell HUD 暂未支持，会 fail fast 并提示使用 WSL HUD。
 - `codex-hud-wsl`：显式 WSL 完整 HUD 模式（Ubuntu + Bash + tmux）。
 - `cmd.exe`：安装后会获得托管 `.cmd` shim，实际调用同一套 PowerShell entrypoint，并使用 `ExecutionPolicy Bypass`。
 
@@ -207,4 +252,6 @@ cd codex-hud
 - `codex-hud-upgrade`
 - `codex-hud-uninstall`
 
-安装脚本会在 Windows 上准备 Node.js、Codex CLI 与 native tmux；在 WSL 中通过 root 或 passwordless `sudo` 准备 `tmux`、Node.js LTS、`npm` 和 `@openai/codex`。如果 WSL 权限不足，会 fail fast 并输出可在 WSL 内手动执行的命令。
+安装脚本会在 Windows 上准备 Node.js 与 Codex CLI；Windows 默认 HUD 路径只使用 WSL，因此默认不再安装 native tmux。在 WSL 中会通过 root 或 passwordless `sudo` 准备 `tmux`、Node.js LTS、`npm` 和 `@openai/codex`。如果 WSL 权限不足，会 fail fast 并输出可在 WSL 内手动执行的命令。
+
+Linux/macOS/Git Bash 的 `install.sh` 也会对缺失依赖 fail fast，并输出精确检查项与安装指导。关键检查包括 `command -v node`、`node --version`、`command -v npm`、`npm --version`、`command -v tmux` 与 `tmux -V`。

@@ -48,6 +48,14 @@ FAKE
 
 chmod +x "$FAKE_BIN_DIR/codex" "$FAKE_BIN_DIR/node" "$FAKE_BIN_DIR/npm" "$FAKE_BIN_DIR/tput"
 
+native_windows_shell=0
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    native_windows_shell=1
+    export CODEX_HUD_WINDOWS_BASH_EXE="${CODEX_HUD_WINDOWS_BASH_EXE:-$(command -v bash)}"
+    ;;
+esac
+
 TMUX_TMPDIR="$TMUX_DIR" tmux -f /dev/null new-session -d -s bootstrap "sleep 30"
 TMUX_TMPDIR="$TMUX_DIR" tmux -f /dev/null set-option -g base-index 1
 
@@ -63,7 +71,9 @@ if grep -q "no such window" <<<"$output"; then
 fi
 
 # Non-interactive shell cannot attach tmux client; this is expected here.
-if ! grep -q "open terminal failed: not a terminal" <<<"$output"; then
+if ! grep -q "open terminal failed: not a terminal" <<<"$output" &&
+  ! { [[ "$native_windows_shell" -eq 1 ]] && grep -q "no server running" <<<"$output"; } &&
+  ! { [[ "$native_windows_shell" -eq 1 ]] && grep -q "server exited unexpectedly" <<<"$output"; }; then
   echo "Expected non-interactive attach error was not observed:" >&2
   echo "$output" >&2
   exit 1

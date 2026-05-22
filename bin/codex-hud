@@ -600,42 +600,6 @@ create_session() {
     for arg in "${codex_args[@]}"; do
         codex_cmd="$codex_cmd $(printf "%q" "$arg")"
     done
-    
-    # Create new detached session
-    if [[ -n "$tmux_windows_bash" ]]; then
-        tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height" "$tmux_windows_bash"
-        tmux set-option -t "$SESSION_NAME" default-shell "$tmux_windows_bash" 2>/dev/null || true
-    else
-        tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
-    fi
-    # Keep wheel scrolling available in Codex pane by default.
-    local mouse_setting
-    mouse_setting=$(parse_boolean_setting "CODEX_HUD_MOUSE" "${CODEX_HUD_MOUSE:-}" "1") || exit 1
-
-    if [[ "$mouse_setting" == "1" ]]; then
-        tmux set-option -t "$SESSION_NAME" mouse on
-        tmux set-option -t "$SESSION_NAME" wheel-scroll-lines 1 2>/dev/null || true
-    else
-        tmux set-option -t "$SESSION_NAME" mouse off
-    fi
-
-    tmux set-option -t "$SESSION_NAME" escape-time 0
-    tmux set-option -t "$SESSION_NAME" assume-paste-time 0
-    tmux set-option -t "$SESSION_NAME" repeat-time 0
-    tmux set-option -t "$SESSION_NAME" history-limit 200000
-
-    local alternate_screen
-    alternate_screen=$(resolve_alternate_screen_setting) || exit 1
-    if [[ "$alternate_screen" == "1" ]]; then
-        tmux set-window-option -t "$SESSION_NAME" alternate-screen on
-    else
-        tmux set-window-option -t "$SESSION_NAME" alternate-screen off
-    fi
-    local main_pane_id
-    main_pane_id=$(get_primary_pane_id)
-    if [[ -z "$main_pane_id" ]]; then
-        error "Failed to detect tmux pane for session: $SESSION_NAME"
-    fi
 
     if [[ -n "$tmux_windows_bash" ]]; then
         start_signal="codex-hud-start-${SESSION_NAME}"
@@ -674,19 +638,47 @@ tmux kill-session -t '$SESSION_NAME'
 exit \$rc
 EOF
         chmod +x "$main_runner"
-        main_cmd="bash $(printf "%q" "$main_runner")"
-    else
-        main_cmd="cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'"
     fi
 
-    tmux send-keys -t "$main_pane_id" "$main_cmd" C-m
+    # Create new detached session
+    if [[ -n "$tmux_windows_bash" ]]; then
+        tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height" "$tmux_windows_bash" "$main_runner"
+    else
+        tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    fi
+    # Keep wheel scrolling available in Codex pane by default.
+    local mouse_setting
+    mouse_setting=$(parse_boolean_setting "CODEX_HUD_MOUSE" "${CODEX_HUD_MOUSE:-}" "1") || exit 1
+
+    if [[ "$mouse_setting" == "1" ]]; then
+        tmux set-option -t "$SESSION_NAME" mouse on
+        tmux set-option -t "$SESSION_NAME" wheel-scroll-lines 1 2>/dev/null || true
+    else
+        tmux set-option -t "$SESSION_NAME" mouse off
+    fi
+
+    tmux set-option -t "$SESSION_NAME" escape-time 0
+    tmux set-option -t "$SESSION_NAME" assume-paste-time 0
+    tmux set-option -t "$SESSION_NAME" repeat-time 0
+    tmux set-option -t "$SESSION_NAME" history-limit 200000
+
+    local alternate_screen
+    alternate_screen=$(resolve_alternate_screen_setting) || exit 1
+    if [[ "$alternate_screen" == "1" ]]; then
+        tmux set-window-option -t "$SESSION_NAME" alternate-screen on
+    else
+        tmux set-window-option -t "$SESSION_NAME" alternate-screen off
+    fi
+    local main_pane_id
+    main_pane_id=$(get_primary_pane_id)
+    if [[ -z "$main_pane_id" ]]; then
+        error "Failed to detect tmux pane for session: $SESSION_NAME"
+    fi
 
     if [[ -z "$tmux_windows_bash" ]]; then
+        main_cmd="cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'"
+        tmux send-keys -t "$main_pane_id" "$main_cmd" C-m
         sleep 0.2
-    elif [[ -n "$runtime_capture_file" ]]; then
-        local runtime_capture_file_escaped
-        runtime_capture_file_escaped=$(printf "%q" "$runtime_capture_file")
-        tmux pipe-pane -o -t "$main_pane_id" "cat >> $runtime_capture_file_escaped" 2>/dev/null || true
     fi
     
     # Split the window based on HUD_POSITION
@@ -720,8 +712,7 @@ EOF
         # Split at top, then swap panes
         local hud_pane_id
         if [[ -n "$tmux_windows_bash" ]]; then
-            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$tmux_windows_bash")
-            tmux send-keys -t "$hud_pane_id" "$hud_cmd" C-m
+            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$tmux_windows_bash" "$hud_runner")
         else
             hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -b -P -F "#{pane_id}" "$hud_cmd")
         fi
@@ -730,8 +721,7 @@ EOF
         # Default: bottom
         local hud_pane_id
         if [[ -n "$tmux_windows_bash" ]]; then
-            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$tmux_windows_bash")
-            tmux send-keys -t "$hud_pane_id" "$hud_cmd" C-m
+            hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$tmux_windows_bash" "$hud_runner")
         else
             hud_pane_id=$(tmux split-window -v -t "$SESSION_NAME" -l "$HUD_HEIGHT" -P -F "#{pane_id}" "$hud_cmd")
         fi
@@ -941,7 +931,7 @@ self_check() {
     if command_exists tmux; then
         info "tmux $(tmux -V)"
         local pane_index
-        pane_index=$(tmux show-options -gqv pane-base-index)
+        pane_index=$(tmux show-options -gqv pane-base-index 2>/dev/null || true)
         if [[ -n "$pane_index" && "$pane_index" != "0" ]]; then
             info "tmux pane-base-index=$pane_index (supported)"
         fi

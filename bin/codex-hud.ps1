@@ -17,28 +17,30 @@ $wslWrapper = Join-Path $PSScriptRoot 'codex-hud-wsl.ps1'
 
 function Show-Help {
     @"
-codex-hud (Windows native wrapper)
+codex-hud (Windows wrapper)
 
 Usage:
-  codex-hud [codex args...]
+  codex-hud [--wsl] [codex args...]
 
 Behavior:
-  - PowerShell native HUD is the default when Git Bash + tmux-windows + Node are available.
-  - If native HUD launch fails, codex-hud automatically retries via WSL HUD.
-  - If both HUD modes fail, it falls back to plain codex CLI.
+  - WSL HUD is the default Windows launch path.
+  - If WSL HUD is unavailable, it falls back to plain codex CLI.
 
 Options:
+  --wsl            Force WSL HUD mode
   -h, --help       Show this message
-  --self-check     Show diagnostics for native and WSL runtimes
+  --self-check     Show diagnostics for WSL runtime
 
 Tip:
-  Use codex-hud-wsl for an explicit WSL HUD launch.
+  Default mode is WSL HUD -> plain codex CLI.
 "@ | Write-Host
 }
 
-function Get-FirstCliArgument {
-    if ($CliArgs -and $CliArgs.Count -gt 0) {
-        return $CliArgs[0]
+function Get-FirstArgumentFromList {
+    param([AllowNull()][AllowEmptyCollection()][string[]]$Arguments)
+
+    if ($Arguments -and $Arguments.Count -gt 0) {
+        return $Arguments[0]
     }
 
     return $null
@@ -50,6 +52,50 @@ function Get-SafeCliArguments {
     }
 
     return @($CliArgs)
+}
+
+function Remove-FirstArgument {
+    param([AllowNull()][AllowEmptyCollection()][string[]]$Arguments)
+
+    if (-not $Arguments -or $Arguments.Count -le 1) {
+        return @()
+    }
+
+    return @($Arguments[1..($Arguments.Count - 1)])
+}
+
+function Resolve-LaunchRequest {
+    param([AllowNull()][AllowEmptyCollection()][string[]]$Arguments)
+
+    $safeArguments = if ($Arguments) { @($Arguments) } else { @() }
+    $first = Get-FirstArgumentFromList -Arguments $safeArguments
+
+    switch ($first) {
+        '--wsl' {
+            return [pscustomobject]@{
+                Mode = 'wsl'
+                Arguments = @(Remove-FirstArgument -Arguments $safeArguments)
+            }
+        }
+        '--powershell' {
+            return [pscustomobject]@{
+                Mode = 'powershell-unsupported'
+                Arguments = @(Remove-FirstArgument -Arguments $safeArguments)
+            }
+        }
+        '--native' {
+            return [pscustomobject]@{
+                Mode = 'powershell-unsupported'
+                Arguments = @(Remove-FirstArgument -Arguments $safeArguments)
+            }
+        }
+        default {
+            return [pscustomobject]@{
+                Mode = 'auto'
+                Arguments = $safeArguments
+            }
+        }
+    }
 }
 
 function Test-BooleanEnvironmentValue {
@@ -573,7 +619,7 @@ function Invoke-NativeHudWrapper {
 
         $env:CODEX_HUD_SCRIPT_DIR = Convert-ToMsysPath -WindowsPath $PSScriptRoot
         if ($Runtime.TmuxBash) {
-            $env:CODEX_HUD_WINDOWS_BASH_EXE = $Runtime.TmuxBash
+            $env:CODEX_HUD_WINDOWS_BASH_EXE = Convert-ToMsysPath -WindowsPath $Runtime.TmuxBash
         } else {
             Remove-Item Env:CODEX_HUD_WINDOWS_BASH_EXE -ErrorAction SilentlyContinue
         }
@@ -659,6 +705,79 @@ function Invoke-NativeHudWrapper {
     }
 }
 
+function Invoke-NativeHudAttempt {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$Runtime,
+        [AllowNull()][AllowEmptyCollection()][string[]]$Arguments = @()
+    )
+
+    $firstArgument = Get-FirstArgumentFromList -Arguments $Arguments
+    $nativeAttach = Test-NativeAttachRequest -FirstArgument $firstArgument
+
+    if ($nativeAttach) {
+        $launchResult = Invoke-NativeHudWrapper -Runtime $Runtime -DeferFinalAttach -Arguments $Arguments
+        if ($launchResult.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($launchResult.SessionName)) {
+            $attachResult = Invoke-NativeTmuxAttach -TmuxCommand $Runtime.Tmux -SessionName $launchResult.SessionName
+            if ($attachResult.Success) {
+                return [pscustomobject]@{
+                    Success = $true
+                    ExitCode = $attachResult.ExitCode
+                    Reason = 'attached'
+                }
+            }
+
+            if (-not (Test-AttachPolicyMayReuseSession -Arguments $Arguments)) {
+                Remove-TmuxSession -TmuxCommand $Runtime.Tmux -SessionName $launchResult.SessionName
+            }
+
+            return [pscustomobject]@{
+                Success = $false
+                ExitCode = $attachResult.ExitCode
+                Reason = "native PowerShell HUD attach failed ($($attachResult.Reason))"
+            }
+        }
+
+        if ($launchResult.ExitCode -eq 0) {
+            return [pscustomobject]@{
+                Success = $false
+                ExitCode = 1
+                Reason = 'native PowerShell HUD launch did not report a tmux session'
+            }
+        }
+
+        return [pscustomobject]@{
+            Success = $false
+            ExitCode = $launchResult.ExitCode
+            Reason = "native PowerShell HUD launch failed (exit=$($launchResult.ExitCode))"
+        }
+    }
+
+    $nativeResult = Invoke-NativeHudWrapper -Runtime $Runtime -Arguments $Arguments
+    if ($nativeResult.ExitCode -eq 0) {
+        return [pscustomobject]@{
+            Success = $true
+            ExitCode = 0
+            Reason = 'command-complete'
+        }
+    }
+
+    return [pscustomobject]@{
+        Success = $false
+        ExitCode = $nativeResult.ExitCode
+        Reason = "native PowerShell HUD command failed (exit=$($nativeResult.ExitCode))"
+    }
+}
+
+function Write-WslFallbackBanner {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    Write-Warn '============================================================'
+    Write-Warn 'WSL HUD is the supported Windows launch mode.'
+    Write-Warn "Reason: $Reason"
+    Write-Warn 'Use codex or codex --wsl to start the WSL HUD.'
+    Write-Warn '============================================================'
+}
+
 function Invoke-WslHudFallback {
     param([AllowNull()][AllowEmptyCollection()][string[]]$Arguments = @())
 
@@ -708,17 +827,42 @@ function Invoke-PlainCodex {
     return $LASTEXITCODE
 }
 
-function Invoke-SelfCheck {
-    $nativeRuntime = Resolve-NativeHudRuntime -ProbeTmuxShell
-    if ($nativeRuntime.Ready) {
-        Write-Host '[OK] Native HUD runtime available (bash + tmux + node).' -ForegroundColor Green
-        Write-Host "[OK] native tmux bash: $($nativeRuntime.TmuxBash)" -ForegroundColor Green
-    } else {
-        Write-Host '[WARN] Native HUD runtime unavailable; PowerShell launch will auto-fallback.' -ForegroundColor Yellow
-        foreach ($issue in $nativeRuntime.Issues) {
-            Write-Host "[WARN] native issue: $issue" -ForegroundColor Yellow
+function Get-WslFailureMessage {
+    param([Parameter(Mandatory = $true)][psobject]$WslResult)
+
+    if ($WslResult.Attempted) {
+        return "WSL HUD launch failed (exit=$($WslResult.ExitCode))"
+    }
+
+    switch ($WslResult.Reason) {
+        'wsl-not-found' {
+            return 'wsl.exe not found. Install WSL first: wsl --install -d Ubuntu'
+        }
+        'wsl-distro-missing' {
+            $distro = if ($env:CODEX_HUD_WSL_DISTRO) { $env:CODEX_HUD_WSL_DISTRO } else { 'Ubuntu' }
+            return "WSL distro '$distro' is not ready. Install or register it with: wsl --install -d $distro"
+        }
+        'wsl-wrapper-missing' {
+            return "codex-hud-wsl.ps1 is missing: $wslWrapper"
+        }
+        default {
+            return "WSL HUD unavailable: $($WslResult.Reason)"
         }
     }
+}
+
+function Get-FailureExitCode {
+    param([int]$ExitCode)
+
+    if ($ExitCode -ne 0) {
+        return $ExitCode
+    }
+
+    return 1
+}
+
+function Invoke-SelfCheck {
+    Write-Host '[OK] Windows default launch mode: WSL HUD.' -ForegroundColor Green
 
     $realCodex = Get-RealCodexCommand -RepoRoot $repoRoot -ExcludedPaths @($PSCommandPath)
     if ($realCodex) {
@@ -743,59 +887,39 @@ function Invoke-SelfCheck {
     return 1
 }
 
-$firstArg = Get-FirstCliArgument
-$safeCliArgs = Get-SafeCliArguments
+$launchRequest = Resolve-LaunchRequest -Arguments (Get-SafeCliArguments)
+$safeCliArgs = @($launchRequest.Arguments)
+$firstArg = Get-FirstArgumentFromList -Arguments $safeCliArgs
 
-if ($firstArg -eq '-h' -or $firstArg -eq '--help') {
+if ($launchRequest.Mode -eq 'powershell-unsupported') {
+    Write-ErrorAndExit -Message 'PowerShell HUD is not supported on Windows yet. Use WSL HUD with codex or codex --wsl.' -ExitCode 1
+}
+
+if ($launchRequest.Mode -eq 'auto' -and ($firstArg -eq '-h' -or $firstArg -eq '--help')) {
     Show-Help
     exit 0
 }
 
-if ($firstArg -eq '--self-check') {
+if ($launchRequest.Mode -eq 'auto' -and $firstArg -eq '--self-check') {
     $status = Invoke-SelfCheck
     exit $status
 }
 
-if (Test-DirectCodexPassthrough -FirstArgument $firstArg) {
+if ($launchRequest.Mode -eq 'wsl') {
+    $wslResult = Invoke-WslHudFallback -Arguments $safeCliArgs
+    if ($wslResult.Attempted -and $wslResult.ExitCode -eq 0) {
+        exit 0
+    }
+
+    $message = Get-WslFailureMessage -WslResult $wslResult
+    Write-ErrorAndExit -Message "Explicit WSL HUD mode failed: $message. Native PowerShell HUD is not supported." -ExitCode $wslResult.ExitCode
+}
+
+if ($launchRequest.Mode -eq 'auto' -and (Test-DirectCodexPassthrough -FirstArgument $firstArg)) {
     exit (Invoke-PlainCodex -Arguments $safeCliArgs)
 }
 
-$nativeAttach = Test-NativeAttachRequest -FirstArgument $firstArg
 $wslEligible = Test-WslFallbackEligible -FirstArgument $firstArg
-$nativeRuntime = Resolve-NativeHudRuntime
-
-if ($nativeRuntime.Ready) {
-    if ($nativeAttach) {
-        $launchResult = Invoke-NativeHudWrapper -Runtime $nativeRuntime -DeferFinalAttach -Arguments $safeCliArgs
-        if ($launchResult.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($launchResult.SessionName)) {
-            $attachResult = Invoke-NativeTmuxAttach -TmuxCommand $nativeRuntime.Tmux -SessionName $launchResult.SessionName
-            if ($attachResult.Success) {
-                exit $attachResult.ExitCode
-            }
-
-            if (-not (Test-AttachPolicyMayReuseSession -Arguments $safeCliArgs)) {
-                Remove-TmuxSession -TmuxCommand $nativeRuntime.Tmux -SessionName $launchResult.SessionName
-            }
-
-            Write-Warn "native PowerShell HUD attach failed ($($attachResult.Reason)); trying WSL HUD."
-        } else {
-            if ($launchResult.ExitCode -eq 0) {
-                Write-Warn 'native PowerShell HUD launch did not report a tmux session; trying WSL HUD.'
-            } else {
-                Write-Warn "native PowerShell HUD launch failed (exit=$($launchResult.ExitCode)); trying WSL HUD."
-            }
-        }
-    } else {
-        $nativeResult = Invoke-NativeHudWrapper -Runtime $nativeRuntime -Arguments $safeCliArgs
-        if ($nativeResult.ExitCode -eq 0) {
-            exit 0
-        }
-
-        Write-Warn "native PowerShell HUD command failed (exit=$($nativeResult.ExitCode)); trying WSL HUD."
-    }
-} else {
-    Write-Warn 'native PowerShell HUD runtime unavailable; trying WSL HUD.'
-}
 
 if ($wslEligible) {
     $wslResult = Invoke-WslHudFallback -Arguments $safeCliArgs
@@ -821,5 +945,5 @@ if ($wslEligible) {
     }
 }
 
-Write-Warn 'HUD launch failed on both PowerShell and WSL; falling back to codex CLI.'
+Write-Warn 'WSL HUD launch failed; falling back to codex CLI.'
 exit (Invoke-PlainCodex -Arguments $safeCliArgs)

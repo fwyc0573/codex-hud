@@ -85,6 +85,10 @@ function Ensure-WindowsTmux {
         Write-Warn 'Skipping Windows tmux setup due to CODEX_HUD_SKIP_NATIVE_TMUX_SETUP=1.'
         return $null
     }
+    if ($env:CODEX_HUD_ENABLE_UNSUPPORTED_NATIVE_TMUX_SETUP -ne '1') {
+        Write-Warn 'Skipping Windows tmux setup because native PowerShell HUD is not supported; WSL HUD is the Windows default.'
+        return $null
+    }
 
     $tmux = Get-WindowsTmuxCommand
     if (-not $tmux) {
@@ -176,27 +180,118 @@ function Reinstall-WslCodex {
     }
 
     Write-Info 'Installing nodejs/npm/tmux in WSL and reinstalling codex-cli...'
-    $cmd = @(
-        'set -euo pipefail',
-        'manual_cmd="sudo apt-get update && sudo apt-get install -y ca-certificates curl tmux && curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs && sudo npm install -g @openai/codex@latest"',
-        'if [ "$(id -u)" -eq 0 ]; then SUDO_CMD=""; elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then SUDO_CMD="sudo"; else echo "codex-hud WSL provisioning requires root or passwordless sudo." >&2; echo "Run inside WSL: $manual_cmd" >&2; exit 70; fi',
-        'run_root() { if [ -n "$SUDO_CMD" ]; then sudo "$@"; else "$@"; fi; }',
-        'run_root_env() { if [ -n "$SUDO_CMD" ]; then sudo -E "$@"; else "$@"; fi; }',
-        'get_node_major() { node --version 2>/dev/null | sed -E "s/^v([0-9]+).*/\1/" || true; }',
-        'run_root apt-get update',
-        'run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tmux',
-        'node_major="$(get_node_major)"',
-        'if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then curl -fsSL https://deb.nodesource.com/setup_lts.x | run_root_env bash -; run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs; fi',
-        'node_major="$(get_node_major)"',
-        'if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then echo "Node.js >=18 is required in WSL after provisioning." >&2; exit 71; fi',
-        'command -v npm >/dev/null 2>&1 || { echo "npm is required in WSL after provisioning." >&2; exit 72; }',
-        'run_root npm uninstall -g @openai/codex || true',
-        'run_root npm install -g @openai/codex@latest',
-        'codex --version'
-    ) -join '; '
+    $script = @'
+set -euo pipefail
 
-    & $wsl -d $distro -- bash -lc $cmd
-    if ($LASTEXITCODE -ne 0) {
+repo_root="${1:?Repository root WSL path is required}"
+manual_cmd='sudo apt-get update && sudo apt-get install -y ca-certificates curl tmux && curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs && sudo npm install -g @openai/codex@latest'
+
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO_CMD=""
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    SUDO_CMD="sudo"
+else
+    echo "codex-hud WSL provisioning requires root or passwordless sudo." >&2
+    echo "Run inside WSL: $manual_cmd" >&2
+    exit 70
+fi
+
+run_root() {
+    if [ -n "$SUDO_CMD" ]; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
+run_root_env() {
+    if [ -n "$SUDO_CMD" ]; then
+        sudo -E "$@"
+    else
+        "$@"
+    fi
+}
+
+get_node_major() {
+    node --version 2>/dev/null | sed -E "s/^v([0-9]+).*/\1/" || true
+}
+
+run_root apt-get update
+run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tmux
+
+node_major="$(get_node_major)"
+if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | run_root_env bash -
+    run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+fi
+
+node_major="$(get_node_major)"
+if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then
+    echo "Node.js >=18 is required in WSL after provisioning." >&2
+    exit 71
+fi
+
+command -v npm >/dev/null 2>&1 || {
+    echo "npm is required in WSL after provisioning." >&2
+    exit 72
+}
+
+run_root npm uninstall -g @openai/codex || true
+run_root npm install -g @openai/codex@latest
+codex --version
+
+ALIAS_MARKER="# codex-hud alias"
+SOURCE_MARKER="# codex-hud: load bashrc"
+rc_file="$HOME/.bashrc"
+bash_profile="$HOME/.bash_profile"
+
+touch "$rc_file"
+if grep -qF "$ALIAS_MARKER" "$rc_file" 2>/dev/null; then
+    sed -i '\|# codex-hud alias|d' "$rc_file"
+fi
+
+append_alias() {
+    local name="$1"
+    local target="$2"
+    printf "alias %s=%q  %s\n" "$name" "$target" "$ALIAS_MARKER" >> "$rc_file"
+}
+
+printf "\n" >> "$rc_file"
+append_alias codex "$repo_root/bin/codex-hud"
+append_alias codex-resume "$repo_root/bin/codex-hud resume"
+append_alias codex-hud-install "$repo_root/bin/codex-hud-install"
+append_alias codex-hud-sync "$repo_root/bin/codex-hud-sync"
+append_alias codex-hud-upgrade "$repo_root/bin/codex-hud-upgrade"
+append_alias codex-hud-uninstall "$repo_root/bin/codex-hud-uninstall"
+
+touch "$bash_profile"
+if ! grep -qF "$SOURCE_MARKER" "$bash_profile" 2>/dev/null; then
+    {
+        printf "\n%s\n" "$SOURCE_MARKER"
+        printf "if [ -f \"%s\" ]; then\n" "$rc_file"
+        printf "  . \"%s\"\n" "$rc_file"
+        printf "fi\n"
+    } >> "$bash_profile"
+fi
+'@
+
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-hud-wsl-provision-{0}.sh" -f ([guid]::NewGuid().ToString('N')))
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $scriptLf = (($script -replace "`r`n", "`n") -replace "`r", "`n")
+    [System.IO.File]::WriteAllText($tempScript, $scriptLf, $utf8NoBom)
+
+    try {
+        $tempScriptWsl = Convert-WindowsPathToWsl -WslCommand $wsl -Distro $distro -WindowsPath $tempScript
+        $repoRootWsl = Convert-WindowsPathToWsl -WslCommand $wsl -Distro $distro -WindowsPath $repoRoot
+        & $wsl -d $distro -- bash $tempScriptWsl $repoRootWsl
+        $provisionExitCode = $LASTEXITCODE
+    } finally {
+        if (Test-Path -LiteralPath $tempScript) {
+            Remove-Item -LiteralPath $tempScript -Force
+        }
+    }
+
+    if ($provisionExitCode -ne 0) {
         throw 'Failed to provision WSL codex-cli automatically. See the WSL output above for root cause and manual commands.'
     }
 }

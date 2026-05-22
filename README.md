@@ -2,6 +2,9 @@
 
 | Date       | Summary of Changes |
 |------------|--------------------|
+| 2026-05-22 | Documented Windows current-branch download, self-check, and WSL launch flow with screenshots. |
+| 2026-05-22 | Switched Windows default launch policy to WSL-only and marked native PowerShell HUD as unsupported. |
+| 2026-05-22 | Documented explicit Windows launch-mode flags and Bash installer dependency guidance. |
 | 2026-05-21 | Documented completed Windows PowerShell, cmd, and WSL dual-entry behavior. |
 
 <p align="center">
@@ -15,7 +18,7 @@
 
 Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex). Lightweight, zero-config, works inside tmux.
 
-> This branch documents the Windows dual-entry build: native PowerShell is the default entry, WSL is the explicit full-HUD entry, and Linux/macOS keep the existing Bash flow.
+> This branch documents the Windows WSL-first build: Windows `codex` launches the WSL HUD by default, native PowerShell HUD is not a supported user launch mode, and Linux/macOS keep the existing Bash flow.
 
 > Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.
 
@@ -54,45 +57,64 @@ cd codex-hud
 codex
 ```
 
-### Windows (PowerShell + WSL Dual Entry)
+### Windows Current Branch (WSL Default)
 
-This branch adds a Windows-first install and launch flow:
+This branch uses WSL as the supported Windows HUD runtime. PowerShell and cmd are launcher shells; the HUD itself runs in Ubuntu WSL with Bash and tmux.
 
-- `codex` tries native PowerShell HUD first.
-- If native HUD cannot start or exits too quickly, it automatically retries with `codex-hud-wsl`.
-- If both HUD paths are unavailable, it prints a warning and falls back to plain native `codex`.
-- `codex-hud-wsl` is the explicit full-HUD command for WSL Ubuntu.
-- `cmd.exe` users get managed `.cmd` shims that invoke the same PowerShell entrypoints with `ExecutionPolicy Bypass`.
+1. Download and switch to this branch:
 
 ```powershell
 git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
+git switch feature/windows-support-dual-entry
 .\bin\codex-hud-install.ps1
-
-# Reload profile, then:
-codex            # Default: native PowerShell HUD, then WSL HUD fallback, then plain codex
-codex-hud-wsl    # Explicit: full HUD in WSL (Ubuntu + tmux)
 ```
 
-`codex-hud-install.ps1` will automatically:
+2. Open a new PowerShell or cmd window, then check the WSL runtime:
+
+```powershell
+codex --self-check
+```
+
+![Windows WSL self-check](./doc/fig/wsl-self-check.png)
+
+3. Run Codex HUD:
+
+```powershell
+codex
+```
+
+![Windows WSL launch](./doc/fig/windows-wsl.png)
+
+Notes:
+
+- `codex` launches the WSL HUD by default on Windows.
+- `codex --wsl ...` explicitly requests the same WSL HUD path and strips the wrapper flag before forwarding Codex CLI args.
+- Native PowerShell HUD is currently unsupported as a user launch mode; legacy native-mode requests fail fast with an unsupported-mode error.
+- `codex-hud-wsl` is the explicit full-HUD command for WSL Ubuntu.
+- `cmd.exe` users get managed `.cmd` shims that invoke the same PowerShell entrypoints with `ExecutionPolicy Bypass`.
+
+`codex-hud-install.ps1` automatically:
 
 - install Node.js LTS on Windows if needed
 - reinstall `@openai/codex` globally on Windows
-- install Windows native `tmux` via `winget` if needed
 - ensure Ubuntu WSL is available when possible
 - provision WSL with `tmux`, Node.js LTS, `npm`, and `@openai/codex`
 - fail fast with exact manual WSL commands if root or passwordless `sudo` is unavailable
 
-#### PowerShell Default Path
+For Linux/macOS/Git Bash installs, `install.sh` now fails fast with exact checks and install guidance when required tools are missing. The main required checks are `command -v node`, `node --version`, `command -v npm`, `npm --version`, `command -v tmux`, and `tmux -V`.
+
+#### Windows Default Path
 
 ```powershell
 . $PROFILE.CurrentUserAllHosts
 codex
+codex --wsl
 codex --self-check
 codex-resume
 ```
 
-Use this when you want the normal Windows entry. On this branch it is the default command path after install.
+Use `codex` when you want the normal Windows entry. It uses WSL HUD by default. Use `codex --wsl` when you want to be explicit about the WSL path. Legacy native-mode requests are intentionally rejected because native PowerShell HUD is not supported yet.
 
 #### WSL Full HUD Path
 
@@ -110,8 +132,8 @@ After the first install, these are available in PowerShell and cmd:
 
 | Command | Description |
 |---------|-------------|
-| `codex` | Default Windows entry: native HUD, then WSL fallback, then plain codex |
-| `codex-resume` | Resume through the same Windows entry chain |
+| `codex` | Default Windows entry: WSL HUD, then plain Windows codex fallback |
+| `codex-resume` | Resume through the same Windows WSL entry |
 | `codex-hud-wsl` | Launch full HUD mode via WSL |
 | `codex-hud-sync` | Rebuild and refresh aliases for the current checkout |
 | `codex-hud-upgrade` | Pull latest changes, then rebuild |
@@ -140,6 +162,7 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ```bash
 codex                        # Launch with HUD
 codex --model gpt-5          # Pass any Codex CLI args
+codex --wsl --model gpt-5    # Explicit WSL HUD mode on Windows
 codex "help me debug this"   # With prompt
 codex-resume                 # Resume last session
 codex-hud-wsl                # Explicit full HUD in WSL (Windows only)
@@ -205,9 +228,9 @@ enabled = true
 | Linux | Supported |
 | macOS (Apple Silicon) | Supported |
 | macOS (Intel) | Testing pending |
-| Windows PowerShell | Supported (default entry, native HUD first) |
+| Windows PowerShell | Supported as launcher shell; native PowerShell HUD is unsupported |
 | Windows cmd | Supported (managed `.cmd` shims) |
-| Windows WSL Ubuntu | Supported (`codex-hud-wsl` full HUD entry) |
+| Windows WSL Ubuntu | Supported (default Windows HUD path and `codex-hud-wsl` full HUD entry) |
 
 ## Development
 
@@ -223,6 +246,8 @@ On Windows PowerShell, use `npm.cmd run build` if `npm.ps1` is blocked by Execut
 
 | Date | Change |
 |------|--------|
+| 2026-05-22 | Switch Windows default launch policy to WSL HUD only; reject legacy native PowerShell HUD requests as unsupported |
+| 2026-05-22 | Add Windows launch-mode parsing experiments, a clear native-to-WSL fallback banner, and precise Bash installer dependency guidance |
 | 2026-05-21 | Complete Windows dual-entry hardening: WSL temp wrappers, sudo-based WSL provisioning, cmd shims, first-run session handling, and runtime state precedence |
 | 2026-04-20 | Make Windows PowerShell the default entry, add automatic WSL fallback, auto-install native tmux on install, and document Windows dual-mode usage |
 | 2026-04-19 | Add Windows dual-entry support (`codex` native fallback + `codex-hud-wsl` full HUD), plus PowerShell installer/sync/upgrade/uninstall |

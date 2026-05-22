@@ -56,7 +56,7 @@ function Write-ErrorAndExit {
         [int]$ExitCode = 1
     )
 
-    Write-Error "[codex-hud] $Message"
+    [Console]::Error.WriteLine("[codex-hud] $Message")
     exit $ExitCode
 }
 

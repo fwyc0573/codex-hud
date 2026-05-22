@@ -8,8 +8,8 @@
     "codex-hud": "./bin/codex-hud"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "node ./node_modules/typescript/bin/tsc",
+    "dev": "node ./node_modules/typescript/bin/tsc --watch",
     "start": "node dist/index.js",
     "test:render": "npm run build && node dist/index.js",
     "test:windows": "powershell -ExecutionPolicy Bypass -File ./tests/windows/test-powershell-entrypoints.ps1"

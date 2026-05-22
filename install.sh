@@ -38,6 +38,135 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+print_node_guidance() {
+    cat >&2 << EOF
+
+Required checks:
+  command -v node
+  node --version
+
+Install guidance:
+  Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs
+  macOS:         brew install node
+  Windows Git Bash: run .\\bin\\codex-hud-install.ps1 from PowerShell, or install Node.js LTS from https://nodejs.org/
+EOF
+}
+
+print_npm_guidance() {
+    cat >&2 << EOF
+
+Required checks:
+  command -v npm
+  npm --version
+
+Install guidance:
+  Reinstall Node.js LTS so npm is installed with node.
+  Ubuntu/Debian: sudo apt-get install -y nodejs
+  macOS:         brew install node
+  Windows Git Bash: run .\\bin\\codex-hud-install.ps1 from PowerShell, or reinstall Node.js LTS from https://nodejs.org/
+EOF
+}
+
+print_tmux_guidance() {
+    cat >&2 << EOF
+
+Required checks:
+  command -v tmux
+  tmux -V
+
+Install guidance:
+  Ubuntu/Debian: sudo apt-get update && sudo apt-get install -y tmux
+  RHEL/CentOS:   sudo dnf install -y tmux || sudo yum install -y tmux
+  Arch:          sudo pacman -S tmux
+  Alpine:        sudo apk add tmux
+  macOS:         brew install tmux
+  Windows Git Bash: run .\\bin\\codex-hud-install.ps1 from PowerShell to install tmux-windows, or install arndawg.tmux-windows with winget.
+EOF
+}
+
+print_codex_guidance() {
+    cat >&2 << EOF
+
+Codex CLI guidance:
+  npm install -g @openai/codex@latest
+  codex --version
+EOF
+}
+
+print_git_guidance() {
+    cat >&2 << EOF
+
+Required checks:
+  command -v git
+  git --version
+
+Install guidance:
+  Ubuntu/Debian: sudo apt-get update && sudo apt-get install -y git
+  macOS:         brew install git
+  Windows Git Bash: install Git for Windows from https://git-scm.com/download/win
+EOF
+}
+
+fail_missing_node() {
+    echo -e "${RED}Error:${NC} Node.js 18+ is required, but node was not found in PATH." >&2
+    print_node_guidance
+    exit 1
+}
+
+fail_bad_node_version() {
+    local version="$1"
+    echo -e "${RED}Error:${NC} Node.js 18+ is required, but found ${version:-unknown}." >&2
+    print_node_guidance
+    exit 1
+}
+
+fail_missing_npm() {
+    echo -e "${RED}Error:${NC} npm is required, but npm was not found in PATH." >&2
+    print_npm_guidance
+    exit 1
+}
+
+fail_missing_tmux() {
+    local detail="${1:-}"
+    echo -e "${RED}Error:${NC} tmux is required for Codex HUD, but tmux was not found in PATH." >&2
+    if [[ -n "$detail" ]]; then
+        echo "$detail" >&2
+    fi
+    print_tmux_guidance
+    exit 1
+}
+
+fail_missing_git() {
+    echo -e "${RED}Error:${NC} git is required for codex-hud upgrade, but git was not found in PATH." >&2
+    print_git_guidance
+    exit 1
+}
+
+fail_npm_install() {
+    echo -e "${RED}Error:${NC} Failed to install Node.js dependencies with npm install." >&2
+    cat >&2 << EOF
+
+Diagnostics to run:
+  cd "$SCRIPT_DIR"
+  node --version
+  npm --version
+  npm install
+EOF
+    exit 1
+}
+
+fail_build_project() {
+    echo -e "${RED}Error:${NC} Failed to build the TypeScript project." >&2
+    cat >&2 << EOF
+
+Diagnostics to run:
+  cd "$SCRIPT_DIR"
+  npm run build
+  node ./node_modules/typescript/bin/tsc --pretty false
+EOF
+    exit 1
+}
+
 show_help() {
     cat << EOF
 Codex HUD installer / sync / upgrade utility
@@ -141,34 +270,41 @@ check_dependencies() {
     
     # Check Node.js
     if ! command_exists node; then
-        error "Node.js is required but not installed.
-        
-Install Node.js 18+ from: https://nodejs.org/"
+        fail_missing_node
     fi
     
     local node_version
-    node_version=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [[ "$node_version" -lt 18 ]]; then
-        error "Node.js 18+ is required (found v$node_version)"
+    node_version=$(node --version 2>/dev/null || true)
+    if [[ ! "$node_version" =~ ^v?([0-9]+) ]]; then
+        fail_bad_node_version "$node_version"
     fi
-    info "Node.js $(node --version)"
+
+    local node_major="${BASH_REMATCH[1]}"
+    if [[ "$node_major" -lt 18 ]]; then
+        fail_bad_node_version "$node_version"
+    fi
+    info "Node.js $node_version"
     
     # Check npm
     if ! command_exists npm; then
-        error "npm is required but not installed."
+        fail_missing_npm
     fi
     info "npm $(npm --version)"
     
     # Check tmux - offer to install if missing
     if ! command_exists tmux; then
         warn "tmux is not installed."
+        if [[ ! -t 0 ]]; then
+            fail_missing_tmux "Non-interactive shell detected; install tmux manually and re-run install.sh."
+        fi
+
         echo ""
         read -p "Would you like to install tmux automatically? [Y/n] " -n 1 -r
         echo ""
         if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
             install_tmux
         else
-            warn "tmux is required for the HUD display. You can install it later."
+            fail_missing_tmux "User declined automatic tmux installation."
         fi
     else
         info "tmux $(tmux -V)"
@@ -178,7 +314,8 @@ Install Node.js 18+ from: https://nodejs.org/"
     if command_exists codex; then
         info "codex CLI found"
     else
-        warn "codex CLI not found in PATH. Install from: https://github.com/openai/codex"
+        warn "codex CLI not found in PATH. Install it before launching Codex HUD."
+        print_codex_guidance
     fi
 }
 
@@ -333,16 +470,16 @@ ensure_bashrc_sourced() {
 # Build the project
 build_project() {
     step "Installing Node.js dependencies..."
-    (cd "$SCRIPT_DIR" && npm install) || error "Failed to install dependencies"
+    (cd "$SCRIPT_DIR" && npm install) || fail_npm_install
     
     step "Building TypeScript project..."
-    (cd "$SCRIPT_DIR" && npm run build) || error "Failed to build project"
+    (cd "$SCRIPT_DIR" && npm run build) || fail_build_project
     
     info "Build complete"
 }
 
 upgrade_checkout() {
-    command_exists git || error "git is required for codex-hud upgrade."
+    command_exists git || fail_missing_git
 
     (cd "$SCRIPT_DIR" && git rev-parse --is-inside-work-tree >/dev/null 2>&1) || error "Upgrade requires a git checkout: $SCRIPT_DIR"
 

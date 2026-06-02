@@ -9,10 +9,6 @@
 
 Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex). Lightweight, zero-config, works inside tmux.
 
-## Windows WSL Support
-
-Windows support is available through Ubuntu WSL on the `feature/windows-support-dual-entry` branch. Use `main` for macOS/Linux, and use that feature branch for Windows (WSL).
-
 > Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.
 
 ![Codex HUD — Single Session](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)

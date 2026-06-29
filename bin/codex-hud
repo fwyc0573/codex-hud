@@ -553,8 +553,15 @@ create_session() {
         error "Failed to detect tmux pane for session: $SESSION_NAME"
     fi
     
-    # Send the codex command to the main pane; auto-cleanup when it exits
-    tmux send-keys -t "$SESSION_NAME" "cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'" C-m
+    # Codex probes the terminal during startup. Start it only after a tmux
+    # client is attached so terminal replies are not delivered to the shell.
+    tmux set-option -t "$SESSION_NAME" -q @codex_hud_client_attached 0
+    tmux set-hook -a -t "$SESSION_NAME" client-attached "set-option -t '$SESSION_NAME' -q @codex_hud_client_attached 1"
+
+    # Send the gated codex command to the main pane; auto-cleanup when it exits
+    local attach_gate_cmd
+    attach_gate_cmd="while [ \"\$(tmux show-option -t '$SESSION_NAME' -qv @codex_hud_client_attached)\" != \"1\" ]; do sleep 0.05; done"
+    tmux send-keys -t "$SESSION_NAME" "$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'" C-m
     
     # Wait a moment for the session to be ready
     sleep 0.2

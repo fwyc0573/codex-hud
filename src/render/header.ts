@@ -78,8 +78,10 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig, width: number
   const lines: string[] = [];
   
   // Row 1: Identity | Project | Duration
+  // The identity line omits the context bar here (showContext: false) because
+  // Row 3 (the token line) already renders the context bar with full detail.
   const row1Parts: string[] = [];
-  const identityLine = renderIdentityLine(data, layout, { maxWidth: width });
+  const identityLine = renderIdentityLine(data, layout, { maxWidth: width, showContext: false });
   row1Parts.push(identityLine);
   row1Parts.push(renderProjectLine(data));
   

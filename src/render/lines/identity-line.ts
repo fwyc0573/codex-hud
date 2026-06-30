@@ -49,10 +49,10 @@ function renderContextBreakdown(context: ContextUsage): string {
 export function renderIdentityLine(
   data: HudData,
   layout: LayoutConfig,
-  options: { maxWidth?: number } = {}
+  options: { maxWidth?: number; showContext?: boolean } = {}
 ): string {
   const parts: string[] = [];
-  
+
   // Model name in brackets
   const modelName = data.session?.model ?? getModelDisplayName(data.config);
   const reasoningEffort = data.session?.reasoningEffort ?? data.config.model_reasoning_effort;
@@ -60,8 +60,12 @@ export function renderIdentityLine(
   const identityName = showReasoningEffort ? `${modelName} ${reasoningEffort}` : modelName;
   let contextDisplay = '';
 
-  // Context usage bar (if available)
-  if (data.contextUsage) {
+  // Context usage bar (if available). The expanded layout suppresses this via
+  // `showContext: false` because its dedicated token line already renders the
+  // context bar with more detail (used/total and compaction count); compact
+  // mode keeps it since it has no separate token line.
+  const showContext = options.showContext !== false;
+  if (showContext && data.contextUsage) {
     const ctx = data.contextUsage;
     const bar = coloredBar(ctx.percent, layout.barWidth);
     const percentStr = coloredPercent(ctx.percent);
@@ -73,7 +77,7 @@ export function renderIdentityLine(
       contextDisplay += colors.dim(renderContextBreakdown(ctx));
     }
     
-  } else if (data.tokenUsage?.total_token_usage) {
+  } else if (showContext && data.tokenUsage?.total_token_usage) {
     // Fallback to old token usage format
     const usage = data.tokenUsage.total_token_usage;
     const total = usage.total_tokens ?? 0;

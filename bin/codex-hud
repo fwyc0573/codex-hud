@@ -555,12 +555,19 @@ create_session() {
     
     # Codex probes the terminal during startup. Start it only after a tmux
     # client is attached so terminal replies are not delivered to the shell.
+    # A plain (non-append) set-hook is used to match the rest of this script and
+    # to avoid the tmux >= 3.2 requirement of `set-hook -a`; this session sets no
+    # other client-attached hook, so overwrite and append are equivalent here.
     tmux set-option -t "$SESSION_NAME" -q @codex_hud_client_attached 0
-    tmux set-hook -a -t "$SESSION_NAME" client-attached "set-option -t '$SESSION_NAME' -q @codex_hud_client_attached 1"
+    tmux set-hook -t "$SESSION_NAME" client-attached "set-option -t '$SESSION_NAME' -q @codex_hud_client_attached 1"
 
-    # Send the gated codex command to the main pane; auto-cleanup when it exits
+    # Send the gated codex command to the main pane; auto-cleanup when it exits.
+    # The wait is capped (~10s = 200 * 0.05s) and fails open: if no client ever
+    # attaches, codex still starts rather than leaving the pane hung forever. In
+    # that fail-open path the probe leak this gate guards against can recur, but a
+    # bounded wait is preferred over an unbounded hang when no client appears.
     local attach_gate_cmd
-    attach_gate_cmd="while [ \"\$(tmux show-option -t '$SESSION_NAME' -qv @codex_hud_client_attached)\" != \"1\" ]; do sleep 0.05; done"
+    attach_gate_cmd="i=0; while [ \"\$(tmux show-option -t '$SESSION_NAME' -qv @codex_hud_client_attached)\" != \"1\" ] && [ \"\$i\" -lt 200 ]; do sleep 0.05; i=\$((i+1)); done"
     tmux send-keys -t "$SESSION_NAME" "$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'" C-m
     
     # Wait a moment for the session to be ready

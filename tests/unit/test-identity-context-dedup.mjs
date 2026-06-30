@@ -79,6 +79,28 @@ const kept = stripAnsi(renderIdentityLine(baseData, layout));
 assert.match(kept, BAR_CHARS, 'identity line keeps the context bar by default (compact callers rely on it)');
 assert.match(kept, /45%/, 'identity line keeps the context percentage by default');
 
+// --- Mechanism: the gate also covers the legacy tokenUsage fallback branch ---
+// When only tokenUsage (no contextUsage) is available, renderIdentityLine takes
+// the fallback branch; showContext must gate that branch too so the expanded
+// layout cannot leak the duplicate bar through the legacy path.
+const fallbackData = {
+  ...baseData,
+  contextUsage: undefined,
+  tokenUsage: {
+    total_token_usage: { total_tokens: 50000, input_tokens: 48000, cached_input_tokens: 12000, output_tokens: 2000 },
+    model_context_window: 128000,
+  },
+};
+
+const fallbackSuppressed = stripAnsi(renderIdentityLine(fallbackData, layout, { showContext: false }));
+assert.match(fallbackSuppressed, /\[gpt-5\.4 high\]/, 'fallback identity line keeps model and effort when suppressed');
+assert.doesNotMatch(fallbackSuppressed, BAR_CHARS, 'showContext:false must also drop the tokenUsage-fallback bar');
+assert.doesNotMatch(fallbackSuppressed, /\d+%/, 'showContext:false must also drop the tokenUsage-fallback percentage');
+
+const fallbackKept = stripAnsi(renderIdentityLine(fallbackData, layout));
+assert.match(fallbackKept, BAR_CHARS, 'tokenUsage fallback keeps the bar by default');
+assert.match(fallbackKept, /\d+%/, 'tokenUsage fallback keeps the percentage by default');
+
 // --- End to end: expanded suppresses on Row 1 but still shows Ctx on Row 3 ----
 
 const expandedLines = renderHud(baseData, {

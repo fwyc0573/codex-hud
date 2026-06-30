@@ -122,11 +122,17 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig, width: number
   
   // Row 5+: Activity lines (tools, todos) - but exclude token and session lines since we rendered them above
   const activityLines = collectActivityLines(data);
-  // Filter out token and session lines since we already rendered them
+  // Filter out token and session lines since we already rendered them.
+  // The token line is the sole producer of both "Tokens:" and "Ctx:"; when only
+  // contextUsage (no tokenUsage) is present it renders "Ctx:" without "Tokens:",
+  // so excluding "Ctx:" here prevents a duplicate context bar at the activity tail.
   const filteredActivityLines = activityLines.filter(line => {
-    // Skip if it starts with token/ctx indicators or Dir:/Session: 
-    // (we already rendered these explicitly above)
-    return !line.includes('Tokens:') && !line.includes('Dir: ') && !line.includes('Session: ');
+    return (
+      !line.includes('Tokens:') &&
+      !line.includes('Ctx:') &&
+      !line.includes('Dir: ') &&
+      !line.includes('Session: ')
+    );
   });
   lines.push(...filteredActivityLines);
   

@@ -120,6 +120,18 @@ assert.ok(ctxRow, 'expanded layout must still render the context bar on the toke
 assert.match(ctxRow, BAR_CHARS, 'expanded Row 3 (Ctx) keeps the detailed context bar');
 assert.match(ctxRow, /45%/, 'expanded Row 3 (Ctx) keeps the context percentage');
 
+// The expanded layout must render the context bar EXACTLY once. With only
+// contextUsage (no tokenUsage), the token line is "Ctx:"-only, so it does not
+// match the legacy "Tokens:" filter and was being re-emitted by
+// collectActivityLines at the activity tail. The header filter now also excludes
+// "Ctx:", so there must be no duplicate context row.
+const expandedCtxLineCount = expandedLines.filter((l) => l.includes('Ctx:')).length;
+assert.equal(
+  expandedCtxLineCount,
+  1,
+  'expanded layout must render the Ctx line exactly once (no duplicate at the activity tail)'
+);
+
 // --- End to end: compact keeps the context bar on its single identity row -----
 
 const compactLines = renderHud(baseData, {

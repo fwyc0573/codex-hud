@@ -198,6 +198,86 @@ try {
     assert.ok(result, 'expected declare -x TMUX_PANE snapshots to resolve');
     assertSamePath(result.path, rollout, 'declare -x snapshot should bind the HUD to its rollout');
   }
+
+  // --- PR#5 hardening: every exported TMUX_PANE form across shells must bind ---
+  // The pane id is exported into the codex child by different shells using
+  // different syntaxes; each of these must resolve to the same rollout.
+  for (const assignment of [
+    'declare -rx TMUX_PANE="%70"', // bash read-only export, combined flags
+    "declare -ax TMUX_PANE='%70'", // combined flags, single-quoted value
+    'typeset -x TMUX_PANE=%70',    // zsh/ksh export, bare value
+    'typeset -gx TMUX_PANE="%70"', // zsh global export, combined flags
+    'TMUX_PANE=%70',               // bare assignment (no export keyword)
+  ]) {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const thread = '019d7291-a135-7fe1-b46f-8f3eca4fa451';
+    const rollout = writeRollout(home, {
+      sessionId: thread,
+      cwd,
+      modifiedAt: new Date(),
+    });
+    writeSnapshot(home, thread, '%70', 1775743876858615370n, assignment);
+
+    const finder = new SessionFinder(cwd);
+    const result = finder.check();
+    assert.ok(result, `expected snapshot form to resolve: ${assignment}`);
+    assertSamePath(result.path, rollout, `snapshot form should bind to rollout: ${assignment}`);
+  }
+
+  // --- PR#5 hardening (negative): a variable that merely ends with TMUX_PANE
+  // (e.g. OLD_TMUX_PANE) must never be mistaken for the real TMUX_PANE. ---
+  {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const thread = '019d7291-a135-7fe1-b46f-8f3eca4fa451';
+    writeRollout(home, {
+      sessionId: thread,
+      cwd,
+      modifiedAt: new Date(),
+    });
+    writeSnapshot(home, thread, '%70', 1775743876858615370n, "export OLD_TMUX_PANE='%70'");
+
+    const finder = new SessionFinder(cwd);
+    assert.equal(
+      finder.check(),
+      null,
+      'OLD_TMUX_PANE must not be mistaken for TMUX_PANE'
+    );
+  }
+
+  // --- PR#5 hardening (negative): a non-exported `declare -r` local has no `x`
+  // flag, is not inherited by the codex child, and must not bind. ---
+  {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const thread = '019d7291-a135-7fe1-b46f-8f3eca4fa451';
+    writeRollout(home, {
+      sessionId: thread,
+      cwd,
+      modifiedAt: new Date(),
+    });
+    writeSnapshot(home, thread, '%70', 1775743876858615370n, 'declare -r TMUX_PANE="%70"');
+
+    const finder = new SessionFinder(cwd);
+    assert.equal(
+      finder.check(),
+      null,
+      'non-exported declare -r TMUX_PANE must not bind'
+    );
+  }
 } finally {
   if (originalCodexHome === undefined) {
     delete process.env.CODEX_HOME;

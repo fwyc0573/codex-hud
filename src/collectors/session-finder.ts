@@ -343,8 +343,15 @@ function parseSnapshotFilename(filename: string): { threadId: string; nonce: big
 function readSnapshotPane(filePath: string): string | null {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
+    // Shell snapshots export TMUX_PANE in several forms depending on the shell:
+    //   TMUX_PANE=%1                (bare)
+    //   export TMUX_PANE='%1'       (bash/zsh export)
+    //   declare -x TMUX_PANE="%1"   (bash `declare -p`; flags may combine, e.g. -rx/-xr/-ax)
+    //   typeset -x TMUX_PANE=%1     (zsh/ksh; flags may combine, e.g. -gx)
+    // The declare/typeset prefix is accepted only when its flag set contains `x`
+    // (exported), so non-exported `declare -r`/`declare` locals are ignored.
     const match = content.match(
-      /(?:^|\n)(?:(?:export|declare\s+-x|typeset\s+-x)\s+)?TMUX_PANE=(?:'([^']*)'|"([^"]*)"|([^\n]+))/
+      /(?:^|\n)(?:(?:export|(?:declare|typeset)\s+-[a-zA-Z]*x[a-zA-Z]*)\s+)?TMUX_PANE=(?:'([^']*)'|"([^"]*)"|([^\n]+))/
     );
     const pane = match?.[1] ?? match?.[2] ?? match?.[3];
     return pane ? pane.trim() : null;

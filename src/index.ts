@@ -67,24 +67,31 @@ function getNonCachedInputTokens(usage: TokenUsage | undefined): number {
   return Math.max(0, input - cached);
 }
 
-function baselineAdjustedUsedTokens(tokensInContext: number, contextWindow: number): number {
-  if (contextWindow <= 0) {
-    return 0;
-  }
+// Codex reserves a fixed BASELINE_TOKENS (system prompt, tools, and room to run
+// /compact) that the user cannot reclaim. Codex's own status line measures usage
+// against the *effective* window (window - baseline), subtracting the baseline
+// from BOTH the used tokens and the window. Mirror that exactly so the HUD's
+// percentage matches what Codex displays, instead of adding the baseline (which
+// double-counts it and over-reports usage).
+function effectiveContextWindow(contextWindow: number): number {
+  return Math.max(0, contextWindow - BASELINE_TOKENS);
+}
 
-  const baseline = Math.min(BASELINE_TOKENS, contextWindow);
-  const used = Math.max(0, tokensInContext) + baseline;
-  return Math.max(0, Math.min(contextWindow, used));
+function effectiveUsedTokens(tokensInContext: number, contextWindow: number): number {
+  const effectiveWindow = effectiveContextWindow(contextWindow);
+  const used = Math.max(0, tokensInContext - BASELINE_TOKENS);
+  return Math.max(0, Math.min(effectiveWindow, used));
 }
 
 function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
-  if (contextWindow <= 0) {
+  const effectiveWindow = effectiveContextWindow(contextWindow);
+  if (effectiveWindow <= 0) {
     return 0;
   }
 
-  const used = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
-  const remaining = Math.max(0, contextWindow - used);
-  const percent = (remaining / contextWindow) * 100;
+  const used = effectiveUsedTokens(tokensInContext, contextWindow);
+  const remaining = Math.max(0, effectiveWindow - used);
+  const percent = (remaining / effectiveWindow) * 100;
   return Math.round(Math.max(0, Math.min(100, percent)));
 }
 
@@ -102,13 +109,13 @@ function buildContextUsage(
 
   if (contextWindow > 0 && lastUsage) {
     const tokensInContext = lastUsage.total_tokens ?? 0;
-    const usedWithBaseline = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
+    const used = effectiveUsedTokens(tokensInContext, contextWindow);
     const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
     const percentUsed = 100 - percentRemaining;
 
     return {
-      used: usedWithBaseline,
-      total: contextWindow,
+      used,
+      total: effectiveContextWindow(contextWindow),
       percent: percentUsed,
       inputTokens: getNonCachedInputTokens(lastUsage),
       outputTokens: lastUsage.output_tokens ?? 0,

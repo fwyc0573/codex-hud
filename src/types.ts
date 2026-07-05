@@ -74,8 +74,16 @@ export interface ProjectInfo {
 // ============================================================================
 
 export interface ContextUsage {
+  /**
+   * Tokens used, in the same basis as `total` — so `used / total` matches
+   * `percent`. These are *display* values (effective for a normal window, raw
+   * bounded for a small window), not raw `total_tokens`. See
+   * `calculateContextUsage` in `context-usage.ts`.
+   */
   used: number;
+  /** Denominator the percentage is measured against (see `used`). */
   total: number;
+  /** Rounded 0–100 context-window usage percentage, matching Codex. */
   percent: number;
   inputTokens: number;
   outputTokens: number;

@@ -12,7 +12,7 @@ import { RolloutParser, parseRolloutFile } from './collectors/rollout.js';
 import { createParseQueue } from './utils/parse-queue.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
-import { BASELINE_TOKENS } from './types.js';
+import { calculateContextUsage } from './context-usage.js';
 import type {
   HudData,
   TokenUsage,
@@ -67,27 +67,6 @@ function getNonCachedInputTokens(usage: TokenUsage | undefined): number {
   return Math.max(0, input - cached);
 }
 
-function baselineAdjustedUsedTokens(tokensInContext: number, contextWindow: number): number {
-  if (contextWindow <= 0) {
-    return 0;
-  }
-
-  const baseline = Math.min(BASELINE_TOKENS, contextWindow);
-  const used = Math.max(0, tokensInContext) + baseline;
-  return Math.max(0, Math.min(contextWindow, used));
-}
-
-function percentOfContextWindowRemaining(tokensInContext: number, contextWindow: number): number {
-  if (contextWindow <= 0) {
-    return 0;
-  }
-
-  const used = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
-  const remaining = Math.max(0, contextWindow - used);
-  const percent = (remaining / contextWindow) * 100;
-  return Math.round(Math.max(0, Math.min(100, percent)));
-}
-
 function buildContextUsage(
   tokenUsage: TokenUsageInfo | undefined,
   compactCount: number | undefined,
@@ -102,14 +81,12 @@ function buildContextUsage(
 
   if (contextWindow > 0 && lastUsage) {
     const tokensInContext = lastUsage.total_tokens ?? 0;
-    const usedWithBaseline = baselineAdjustedUsedTokens(tokensInContext, contextWindow);
-    const percentRemaining = percentOfContextWindowRemaining(tokensInContext, contextWindow);
-    const percentUsed = 100 - percentRemaining;
+    const { used, total, percent } = calculateContextUsage(tokensInContext, contextWindow);
 
     return {
-      used: usedWithBaseline,
-      total: contextWindow,
-      percent: percentUsed,
+      used,
+      total,
+      percent,
       inputTokens: getNonCachedInputTokens(lastUsage),
       outputTokens: lastUsage.output_tokens ?? 0,
       cachedTokens: lastUsage.cached_input_tokens ?? 0,

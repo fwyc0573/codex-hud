@@ -47,6 +47,20 @@ function createAgentSpawnSeed(
   };
 }
 
+function isStartedActivityKind(value: unknown): boolean {
+  if (value === 'started') {
+    return true;
+  }
+
+  if (value === 'interacted' || value === 'interrupted') {
+    return false;
+  }
+
+  throw new Error(
+    'Invalid agent spawn activity: kind must be "started", "interacted", or "interrupted".'
+  );
+}
+
 export function normalizeAgentSpawnSeed(record: unknown): AgentSpawnSeed | null {
   const entry = asRecord(record);
   if (entry?.type !== 'event_msg') {
@@ -55,7 +69,7 @@ export function normalizeAgentSpawnSeed(record: unknown): AgentSpawnSeed | null 
 
   const payload = asRecord(entry.payload);
   if (payload?.type === 'sub_agent_activity') {
-    if (payload.kind !== 'started') {
+    if (!isStartedActivityKind(payload.kind)) {
       return null;
     }
 
@@ -72,7 +86,11 @@ export function normalizeAgentSpawnSeed(record: unknown): AgentSpawnSeed | null 
   }
 
   const item = asRecord(payload.item);
-  if (item?.type !== 'SubAgentActivity' || item.kind !== 'started') {
+  if (item?.type !== 'SubAgentActivity') {
+    return null;
+  }
+
+  if (!isStartedActivityKind(item.kind)) {
     return null;
   }
 

@@ -91,6 +91,29 @@ try {
     );
   });
 
+  await check('rejects malformed activity kinds in recognized records', async () => {
+    const { normalizeAgentSpawnSeed } = await agentActivity();
+    const missingLegacyKind = legacyAgentStart();
+    delete missingLegacyKind.payload.kind;
+    const missingPaginatedKind = paginatedAgentStart();
+    delete missingPaginatedKind.payload.item.kind;
+    const malformed = [
+      missingLegacyKind,
+      legacyAgentStart({ kind: 'completed' }),
+      legacyAgentStart({ kind: 123 }),
+      missingPaginatedKind,
+      paginatedAgentStart({ kind: 'completed' }),
+      paginatedAgentStart({ kind: 123 }),
+    ];
+
+    for (const record of malformed) {
+      assert.throws(
+        () => normalizeAgentSpawnSeed(record),
+        /Invalid agent spawn activity: kind/
+      );
+    }
+  });
+
   await check('rejects invalid Legacy and Paginated started identities', async () => {
     const { normalizeAgentSpawnSeed } = await agentActivity();
     const missingLegacyTimestamp = legacyAgentStart();

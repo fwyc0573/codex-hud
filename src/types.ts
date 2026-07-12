@@ -292,24 +292,25 @@ export interface ToolActivity {
 }
 
 // ============================================================================
-// Agent Activity (Similar to claude-hud)
+// Agent Activity
 // ============================================================================
 
-export type AgentStatus = 'running' | 'completed' | 'error';
+export type AgentDisplayStatus = 'starting' | 'running' | 'tracking-error';
 
-export interface AgentCall {
-  id: string;
-  type: string;        // e.g., 'explore', 'librarian', 'oracle'
-  description: string;
-  timestamp: Date;
-  status: AgentStatus;
-  duration?: number;
+export interface AgentActivityRow {
+  threadId: string;
+  agentPath: string;
+  label: string;
+  status: AgentDisplayStatus;
+  elapsedStartedAt?: Date;
+  activeDescendantCount: number;
 }
 
 export interface AgentActivity {
-  recentCalls: AgentCall[];
-  totalCalls: number;
-  lastUpdateTime: Date;
+  rows: AgentActivityRow[];
+  visibleAgentCount: number;
+  rootTrackingError: boolean;
+  updatedAt: Date;
 }
 
 // ============================================================================

@@ -143,13 +143,30 @@ function parseFrames(stdout) {
     .slice(1)
     .map((raw) => {
       const plain = raw.replace(ANSI_ESCAPE, '').replaceAll('\r', '');
+      const physicalLines = plain.split('\n');
+      const tailPhysicalLine = physicalLines.at(-1);
       return {
         raw,
         plain,
-        lines: plain.split('\n').map((line) => line.trimEnd()),
-        complete: countOccurrences(raw, CLEAR_LINE) >= FRAME_LINES,
+        lines: physicalLines.map((line) => line.trimEnd()),
+        tailPhysicalLine,
+        complete:
+          countOccurrences(raw, CLEAR_LINE) >= FRAME_LINES &&
+          tailPhysicalLine === '',
       };
     });
+}
+
+function assertFrameDecoderContract() {
+  const [markerCompleteButTailPartial] = parseFrames(
+    `${CURSOR_HOME}${CLEAR_LINE.repeat(FRAME_LINES)}partial-tail`
+  );
+  assert.equal(markerCompleteButTailPartial.tailPhysicalLine, 'partial-tail');
+  assert.equal(
+    markerCompleteButTailPartial.complete,
+    false,
+    'A frame with enough clear-line markers but a non-empty physical tail must remain incomplete'
+  );
 }
 
 function processClose(child) {
@@ -235,6 +252,11 @@ async function waitForFrame(processState, label, afterCount, predicate) {
         assert.ok(
           countOccurrences(frame.raw, CLEAR_LINE) >= FRAME_LINES,
           `${label}: accepted an incomplete frame`
+        );
+        assert.equal(
+          frame.tailPhysicalLine,
+          '',
+          `${label}: accepted a frame with a non-empty physical tail line`
         );
         const latencyMs = Date.now() - startedAt;
         assert.ok(
@@ -757,6 +779,7 @@ async function runInvalidTimeoutFlow(testRoot, processStates, metrics) {
 }
 
 async function main() {
+  assertFrameDecoderContract();
   assert.ok(fs.existsSync(HUD_ENTRY), `Build output is missing: ${HUD_ENTRY}`);
   const moduleUrl = pathToFileURL(
     path.join(REPO_ROOT, 'dist', 'collectors', 'agent-activity.js')

@@ -70,7 +70,48 @@ try {
   assert.equal(idOnlyOutput.runningCalls.has('fc_id_only'), true);
   assert.equal(idOnlyOutput.result.toolActivity.recentCalls[0].id, 'fc_id_only');
 
-  console.log('test-rollout-call-correlation: PASS (2/2 cases)');
+  const completedIdOnlyPath = writeRolloutFile(root, {
+    sessionId: '019a3333-c333-7cc3-8333-333333333333',
+    timestampLabel: '2026-07-12T00-02-00',
+    records: [
+      canonicalSessionMeta({ id: '019a3333-c333-7cc3-8333-333333333333' }),
+      {
+        timestamp: '2026-07-12T00:02:01.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          id: 'fc_completed_id_only',
+          name: 'read',
+          arguments: '{"file_path":"README.md"}',
+        },
+      },
+      {
+        timestamp: '2026-07-12T00:02:02.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call_output',
+          call_id: 'fc_completed_id_only',
+          output: {
+            success: true,
+          },
+        },
+      },
+    ],
+  });
+
+  const completedIdOnlyOutput = await parseRolloutFile(completedIdOnlyPath);
+  assert.equal(completedIdOnlyOutput.runningCalls.size, 0);
+  assert.equal(completedIdOnlyOutput.result.toolActivity.recentCalls.length, 1);
+  assert.equal(
+    completedIdOnlyOutput.result.toolActivity.recentCalls[0].id,
+    'fc_completed_id_only'
+  );
+  assert.equal(
+    completedIdOnlyOutput.result.toolActivity.recentCalls[0].status,
+    'completed'
+  );
+
+  console.log('test-rollout-call-correlation: PASS (3/3 cases)');
 } finally {
   cleanupAgentTestRoot(root);
 }

@@ -8,7 +8,10 @@ import {
   findRolloutByThreadId,
   type SessionFile,
 } from './session-finder.js';
-import { readCompleteJsonl } from '../utils/jsonl-tail.js';
+import {
+  readCompleteJsonl,
+  type JsonlTailBatch,
+} from '../utils/jsonl-tail.js';
 
 export const AGENT_INACTIVITY_TIMEOUT_ENV =
   'CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS';
@@ -504,6 +507,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error &&
+    'code' in error &&
+    error.code === 'ENOENT';
+}
+
 function requireCanonicalSessionMeta(
   records: readonly unknown[],
   expectedId: string,
@@ -862,6 +871,8 @@ export class AgentActivityCollector {
     try {
       let rolloutPath = current.rolloutPath;
       let resolvedSessionId: string | null = null;
+      let readOffset = current.offset;
+      let relocated = false;
       if (rolloutPath === null) {
         const resolved = this.resolveRollout(current.threadId);
         if (resolved === null) {
@@ -871,18 +882,46 @@ export class AgentActivityCollector {
         resolvedSessionId = resolved.sessionId;
       }
 
-      const batch = await readCompleteJsonl<unknown>(
-        rolloutPath,
-        current.offset
-      );
-      if (batch.truncated && current.offset > 0) {
+      let batch: JsonlTailBatch<unknown>;
+      try {
+        batch = await readCompleteJsonl<unknown>(rolloutPath, readOffset);
+      } catch (error) {
+        if (current.rolloutPath === null || !isMissingFileError(error)) {
+          throw error;
+        }
+
+        const resolved = this.resolveRollout(current.threadId);
+        if (resolved === null) {
+          throw new Error('exact active/archive rollout is unavailable.');
+        }
+        if (resolved.sessionId !== current.threadId) {
+          throw new Error(
+            `Agent ${current.threadId} resolved rollout session mismatch: expected ${current.threadId}, received ${resolved.sessionId}.`
+          );
+        }
+
+        rolloutPath = resolved.path;
+        resolvedSessionId = resolved.sessionId;
+        const canonicalBatch = await readCompleteJsonl<unknown>(rolloutPath, 0);
+        validateChildCanonicalMeta(
+          canonicalBatch.records,
+          resolvedSessionId,
+          current
+        );
+        batch = await readCompleteJsonl<unknown>(rolloutPath, readOffset);
+        relocated = true;
+      }
+      if (batch.truncated && readOffset > 0) {
         throw new Error(
-          `rollout was truncated below committed offset ${current.offset}.`
+          `rollout was truncated below committed offset ${readOffset}.`
         );
       }
 
       let candidate = cloneNode(current);
-      if (!candidate.canonicalValidated) {
+      if (relocated) {
+        candidate.canonicalValidated = true;
+        candidate.rolloutPath = rolloutPath;
+      } else if (!candidate.canonicalValidated) {
         if (resolvedSessionId === null) {
           throw new Error(
             'unvalidated agent rollout must be resolved before canonical validation.'

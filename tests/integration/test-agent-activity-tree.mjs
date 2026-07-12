@@ -1289,6 +1289,248 @@ try {
     );
   });
 
+  await check('re-resolves a cached child rollout after active-to-archive migration', async () => {
+    const ROOT = thread(110);
+    const CHILD = thread(111);
+    const COPIED_LEGACY = thread(112);
+    const COPIED_PAGINATED = thread(113);
+    const WRONG = thread(114);
+    const rootTurn = 'archive-migration-root-turn';
+    const childTurn = 'archive-migration-child-turn';
+    const childAgentPath = '/root/archive_migration_child';
+    const activeRoot = makeAgentTestRoot();
+    let activeRootCleaned = false;
+    const cleanupActiveRoot = () => {
+      if (activeRootCleaned) {
+        return;
+      }
+      activeRootCleaned = true;
+      cleanupAgentTestRoot(activeRoot);
+    };
+    const rootPath = writeRolloutFile(testRoot, {
+      sessionId: ROOT,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T02-10-00',
+      records: [
+        canonicalSessionMeta({ id: ROOT }),
+        taskStarted({
+          turnId: rootTurn,
+          startedAt: 60,
+          timestamp: timestamp(60_000),
+        }),
+        legacyAgentStart({
+          eventId: 'call_archive_migration_child',
+          childThreadId: CHILD,
+          agentPath: childAgentPath,
+          occurredAtMs: 60_100,
+          timestamp: timestamp(60_100),
+        }),
+      ],
+    });
+    const childRecords = [
+      childMeta({
+        id: CHILD,
+        parentThreadId: ROOT,
+        agentPath: childAgentPath,
+      }),
+      taskStarted({
+        turnId: rootTurn,
+        startedAt: 60,
+        timestamp: timestamp(60_000),
+      }),
+      legacyAgentStart({
+        eventId: 'call_archive_migration_copied_legacy',
+        childThreadId: COPIED_LEGACY,
+        agentPath: '/root/copied_legacy',
+        occurredAtMs: 60_010,
+        timestamp: timestamp(60_010),
+      }),
+      paginatedAgentStart({
+        eventId: 'call_archive_migration_copied_paginated',
+        childThreadId: COPIED_PAGINATED,
+        agentPath: '/root/copied_paginated',
+        occurredAtMs: 60_020,
+        parentThreadId: ROOT,
+        turnId: rootTurn,
+        timestamp: timestamp(60_020),
+      }),
+      taskStarted({
+        turnId: childTurn,
+        startedAt: 61,
+        timestamp: timestamp(61_000),
+      }),
+    ];
+    const activePath = writeRolloutFile(activeRoot, {
+      sessionId: CHILD,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T02-11-00',
+      records: childRecords,
+    });
+    const archivePath = writeRolloutFile(testRoot, {
+      sessionId: CHILD,
+      storage: 'archived_sessions',
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T02-11-00',
+      records: [
+        ...childRecords,
+        taskComplete({
+          turnId: childTurn,
+          timestamp: timestamp(61_300),
+        }),
+      ],
+    });
+    const wrongSessionPath = writeRolloutFile(testRoot, {
+      sessionId: CHILD,
+      storage: 'archived_sessions',
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T02-12-00',
+      records: childRecords,
+    });
+    const wrongCanonicalPath = writeRolloutFile(testRoot, {
+      sessionId: CHILD,
+      storage: 'archived_sessions',
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T02-13-00',
+      records: [
+        childMeta({
+          id: WRONG,
+          parentThreadId: ROOT,
+          agentPath: childAgentPath,
+        }),
+      ],
+    });
+    const truncatedPath = writeRolloutFile(testRoot, {
+      sessionId: CHILD,
+      storage: 'archived_sessions',
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T02-14-00',
+      records: [
+        childMeta({
+          id: CHILD,
+          parentThreadId: ROOT,
+          agentPath: childAgentPath,
+        }),
+      ],
+    });
+    const files = new Map([[CHILD, { path: activePath }]]);
+    const calls = [];
+    const logs = [];
+    const collector = new AgentActivityCollector({
+      inactivityTimeoutMs: 1_000,
+      resolveRollout: createResolver(files, calls),
+      logError: (message) => logs.push(message),
+    });
+    collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+
+    try {
+      const active = await collector.collect(61_100);
+      assert.equal(active.visibleAgentCount, 1);
+      assert.equal(active.rows[0]?.status, 'running');
+      assert.equal(calls.filter((threadId) => threadId === CHILD).length, 1);
+
+      appendRolloutText(activePath, '{"broken":\n');
+      const malformed = await collector.collect(61_200);
+      assert.equal(malformed.visibleAgentCount, 1);
+      assert.equal(malformed.rows[0]?.status, 'tracking-error');
+      assert.equal(
+        calls.filter((threadId) => threadId === CHILD).length,
+        1,
+        'Malformed JSONL must not trigger rollout relocation'
+      );
+
+      cleanupActiveRoot();
+      files.delete(CHILD);
+
+      const assertRelocationError = async (expectedResolverAttempts) => {
+        const activity = await collector.collect(61_300);
+        assert.equal(activity.visibleAgentCount, 1);
+        assert.equal(activity.rows[0]?.status, 'tracking-error');
+        assert.equal(
+          calls.filter((threadId) => threadId === CHILD).length,
+          expectedResolverAttempts,
+          `archive migration resolver attempts before recovery: expected=${expectedResolverAttempts} actual=${calls.filter((threadId) => threadId === CHILD).length}`
+        );
+      };
+
+      await assertRelocationError(2);
+      files.set(CHILD, { path: wrongSessionPath, sessionId: WRONG });
+      await assertRelocationError(3);
+      files.set(CHILD, { path: wrongCanonicalPath });
+      await assertRelocationError(4);
+      files.set(CHILD, { path: truncatedPath });
+      await assertRelocationError(5);
+      files.set(CHILD, { path: archivePath });
+
+      const recovered = await collector.collect(61_300);
+      const resolverAttempts = calls.filter(
+        (threadId) => threadId === CHILD
+      ).length;
+      const trackingRecoveryTransitions = logs.filter(
+        (message) => message.includes(CHILD) && message.includes('recovered')
+      ).length;
+      const trackingErrorTransitions = logs.filter(
+        (message) => message.includes(CHILD) && message.includes('tracking error')
+      ).length;
+      const rejectedRelocations = resolverAttempts - 2;
+      const copiedLegacyResolverAttempts = calls.filter(
+        (threadId) => threadId === COPIED_LEGACY
+      ).length;
+      const copiedPaginatedResolverAttempts = calls.filter(
+        (threadId) => threadId === COPIED_PAGINATED
+      ).length;
+      assert.equal(
+        resolverAttempts,
+        6,
+        `archive migration resolver attempts: expected=6 actual=${resolverAttempts}`
+      );
+      assert.equal(
+        trackingRecoveryTransitions,
+        1,
+        `archive migration recovery transitions: expected=1 actual=${trackingRecoveryTransitions}`
+      );
+      assert.equal(
+        trackingErrorTransitions,
+        5,
+        `archive migration error transitions: expected=5 actual=${trackingErrorTransitions}`
+      );
+      assert.equal(
+        rejectedRelocations,
+        4,
+        `archive migration rejected relocations: expected=4 actual=${rejectedRelocations}`
+      );
+      assert.equal(
+        copiedLegacyResolverAttempts,
+        0,
+        `archive copied Legacy resolver attempts: expected=0 actual=${copiedLegacyResolverAttempts}`
+      );
+      assert.equal(
+        copiedPaginatedResolverAttempts,
+        0,
+        `archive copied Paginated resolver attempts: expected=0 actual=${copiedPaginatedResolverAttempts}`
+      );
+      assert.equal(
+        recovered.visibleAgentCount,
+        0,
+        `archive terminal visible count: expected=0 actual=${recovered.visibleAgentCount}`
+      );
+      assert.equal(recovered.rows.length, 0);
+      assert.equal(fs.existsSync(activePath), false);
+      assert.equal(fs.existsSync(archivePath), true);
+
+      console.log(
+        `METRIC archive-migration resolverAttempts=${resolverAttempts} ` +
+          `rejectedRelocations=${rejectedRelocations} ` +
+          `trackingErrorTransitions=${trackingErrorTransitions} ` +
+          `trackingRecoveryTransitions=${trackingRecoveryTransitions} ` +
+          `copiedLegacyResolverAttempts=${copiedLegacyResolverAttempts} ` +
+          `copiedPaginatedResolverAttempts=${copiedPaginatedResolverAttempts} ` +
+          `finalVisibleAgentCount=${recovered.visibleAgentCount}`
+      );
+    } finally {
+      cleanupActiveRoot();
+    }
+  });
+
   await check('surfaces and transactionally recovers exact root-fork source errors', async () => {
     const SOURCE = thread(200);
     const ROOT = thread(201);

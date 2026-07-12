@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes |
+|------------|--------------------|
+| 2026-07-12 | Documented authoritative subagent activity, timeout semantics, and overview filtering. |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -82,6 +88,7 @@ mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ Edit: file.ts | ✓ Read ×3
+◐ codex_cli_explore 2m14s ↳2
 ```
 
 | Line | Shows |
@@ -90,7 +97,15 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 | **Environment** | Config count, work mode, MCP servers, instruction files, approval/sandbox |
 | **Tokens** | Total tokens with input/cache/output breakdown, context fill, compact count |
 | **Session** | Working directory, session ID, CLI version |
-| **Activity** | Running tool call, recent tool history |
+| **Activity** | Running tool calls, recent tool history, and active subagents |
+
+### Subagent activity
+
+Expanded mode shows one icon-first row per visible direct child, such as `◐ codex_cli_explore 2m14s ↳2`. The name is the leaf of the typed agent path, and `↳N` is the number of visible active descendants at any depth. A completed or aborted turn disappears immediately unless an active descendant keeps its direct-child aggregate visible. Authoritative rollout or metadata failures remain visible as `✗ <name> tracking error` and retry the same typed child path until it recovers.
+
+Compact mode shows `Agents: N`, where `N` counts all visible tracked agent nodes in the root-owned tree rather than only the displayed direct-child rows. Multi-session overview excludes typed subagent sessions because their activity is already represented by the owning root session.
+
+`CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` controls the running-turn inactivity window. It defaults to `900000` ms (15 minutes) and accepts only a positive safe integer in milliseconds; invalid, empty, zero, negative, decimal, or unsafe values fail at startup. The timeout hides stale presentation only. It does not interrupt an agent and cannot prove that an agent is hung or has crashed. `starting` and `tracking error` entries do not time out.
 
 ## Usage
 
@@ -134,6 +149,7 @@ codex-hud --self-check       # Run diagnostics
 | `CODEX_HUD_AUTO_ATTACH` | `0` | Auto-attach to latest session in same dir |
 | `CODEX_HUD_ALTERNATE_SCREEN` | `0` | tmux alternate-screen for codex pane |
 | `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | Clear scrollback on first render |
+| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | Running-agent presentation timeout; positive safe integer milliseconds only |
 | `CODEX_HUD_CWD` | (unset) | Override working directory |
 | `CODEX_HOME` | `~/.codex` | Codex home directory |
 | `CODEX_SESSIONS_PATH` | (unset) | Override sessions directory |

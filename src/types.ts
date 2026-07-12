@@ -145,6 +145,31 @@ export type RolloutPayload =
   | EventMsgPayload
   | TurnContextPayload;
 
+export type SessionSource =
+  | 'cli'
+  | 'vscode'
+  | 'exec'
+  | 'mcp'
+  | 'unknown'
+  | { custom: string }
+  | { internal: unknown }
+  | { subagent: SubagentSource };
+
+export type SubagentSource =
+  | 'review'
+  | 'compact'
+  | 'memory_consolidation'
+  | { other: string }
+  | {
+      thread_spawn: {
+        parent_thread_id: string;
+        depth: number;
+        agent_path?: string;
+        agent_nickname?: string;
+        agent_role?: string;
+      };
+    };
+
 export interface SessionMetaPayload {
   id: string;
   timestamp: string;
@@ -152,7 +177,10 @@ export interface SessionMetaPayload {
   originator: string;
   cli_version: string;
   instructions?: string;
-  source?: string;
+  source?: SessionSource;
+  forked_from_id?: string;
+  parent_thread_id?: string;
+  agent_path?: string;
   model_provider?: string;
   git?: {
     commit_hash?: string;
@@ -264,24 +292,25 @@ export interface ToolActivity {
 }
 
 // ============================================================================
-// Agent Activity (Similar to claude-hud)
+// Agent Activity
 // ============================================================================
 
-export type AgentStatus = 'running' | 'completed' | 'error';
+export type AgentDisplayStatus = 'starting' | 'running' | 'tracking-error';
 
-export interface AgentCall {
-  id: string;
-  type: string;        // e.g., 'explore', 'librarian', 'oracle'
-  description: string;
-  timestamp: Date;
-  status: AgentStatus;
-  duration?: number;
+export interface AgentActivityRow {
+  threadId: string;
+  agentPath: string;
+  label: string;
+  status: AgentDisplayStatus;
+  elapsedStartedAt?: Date;
+  activeDescendantCount: number;
 }
 
 export interface AgentActivity {
-  recentCalls: AgentCall[];
-  totalCalls: number;
-  lastUpdateTime: Date;
+  rows: AgentActivityRow[];
+  visibleAgentCount: number;
+  rootTrackingError: boolean;
+  updatedAt: Date;
 }
 
 // ============================================================================
@@ -321,6 +350,10 @@ export interface SessionInfo {
   model?: string;
   reasoningEffort?: string;
   modelProvider?: string;
+  source?: SessionSource;
+  forkedFromId?: string;
+  parentThreadId?: string;
+  agentPath?: string;
   git?: {
     branch?: string;
     commitHash?: string;

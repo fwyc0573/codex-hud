@@ -185,7 +185,7 @@ export async function parseRolloutFile(
 
         // Process based on entry type
         lastEventTime = timestamp;
-        if (entry.type === 'session_meta') {
+        if (entry.type === 'session_meta' && !session) {
           const meta = entry.payload as SessionMetaPayload;
           session = {
             id: meta.id,
@@ -196,6 +196,10 @@ export async function parseRolloutFile(
             model: sessionModel,
             reasoningEffort: sessionReasoningEffort,
             modelProvider: meta.model_provider,
+            source: meta.source,
+            forkedFromId: meta.forked_from_id,
+            parentThreadId: meta.parent_thread_id,
+            agentPath: meta.agent_path,
             git: meta.git
               ? {
                   branch: meta.git.branch,
@@ -229,7 +233,7 @@ export async function parseRolloutFile(
             // New tool call started
             lastToolActivityTime = timestamp;
             const toolCall: ToolCall = {
-              id: payload.id ?? payload.call_id ?? `call_${Date.now()}`,
+              id: payload.call_id ?? payload.id ?? `call_${Date.now()}`,
               name: payload.name,
               timestamp,
               status: 'running',

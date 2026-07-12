@@ -11,6 +11,12 @@ import { SessionFinder, findActiveRollouts } from './collectors/session-finder.j
 import { RolloutParser, parseRolloutFile } from './collectors/rollout.js';
 import { createParseQueue } from './utils/parse-queue.js';
 import { HudFileWatcher } from './collectors/file-watcher.js';
+import {
+  AgentActivityCollector,
+  AGENT_INACTIVITY_TIMEOUT_ENV,
+  isSubagentSessionSource,
+  parseAgentInactivityTimeoutMs,
+} from './collectors/agent-activity.js';
 import { renderToStdout, cleanupRenderer } from './render/index.js';
 import { calculateContextUsage } from './context-usage.js';
 import type {
@@ -99,7 +105,10 @@ function buildContextUsage(
 }
 
 // Phase 2: Session and rollout tracking
+let agentActivityCollector: AgentActivityCollector;
 const sessionFinder = new SessionFinder(HUD_CWD_REAL, (session) => {
+  agentActivityCollector.setRootSession(session);
+
   // When session changes, update rollout path
   if (session) {
     rolloutParser.setRolloutPath(session.path);
@@ -142,6 +151,10 @@ async function collectOverviewData(): Promise<SessionOverview> {
 
   for (const sessionFile of activeSessions) {
     const { result } = await parseRolloutFile(sessionFile.path, 0, 3);
+
+    if (isSubagentSessionSource(result.session?.source)) {
+      continue;
+    }
 
     const hasRecentTool =
       result.lastToolActivityTime &&
@@ -198,6 +211,9 @@ async function collectData(): Promise<HudData> {
     rolloutData = await parseRolloutSafely();
     configNeedsRefresh = false;
   }
+  const agentActivity = session
+    ? await agentActivityCollector.collect(Date.now())
+    : undefined;
 
   // Build context usage from token usage if available
   // Matches codex "context window left" calculation based on last_token_usage.
@@ -211,6 +227,7 @@ async function collectData(): Promise<HudData> {
     ...syncData,
     session: rolloutData?.session ?? undefined,
     toolActivity: rolloutData?.toolActivity ?? undefined,
+    agentActivity,
     planProgress: rolloutData?.planProgress ?? undefined,
     tokenUsage: rolloutData?.tokenUsage ?? undefined,
     contextUsage,
@@ -274,6 +291,11 @@ function setupKeyListener(): void {
  * Main entry point
  */
 async function main(): Promise<void> {
+  const inactivityTimeoutMs = parseAgentInactivityTimeoutMs(
+    process.env[AGENT_INACTIVITY_TIMEOUT_ENV]
+  );
+  agentActivityCollector = new AgentActivityCollector({ inactivityTimeoutMs });
+
   // Set up signal handlers
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

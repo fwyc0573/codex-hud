@@ -1,3 +1,9 @@
+## 변경 이력
+
+| 날짜       | 변경 요약 |
+|------------|-----------|
+| 2026-07-12 | authoritative subagent activity, timeout 의미, 개요 필터링을 문서화했습니다. |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -86,6 +92,7 @@ mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ Edit: file.ts | ✓ Read ×3
+◐ codex_cli_explore 2m14s ↳2
 ```
 
 | 행 | 내용 |
@@ -94,7 +101,15 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 | **환경** | 설정 수, 작업 모드, MCP 서버, 명령 파일, 승인/샌드박스 |
 | **Tokens** | 총 token (입력/cache/출력 내역), context 채움률, compact 횟수 |
 | **Session** | 작업 디렉토리, Session ID, CLI 버전 |
-| **활동** | 실행 중인 도구 호출, 최근 도구 이력 |
+| **활동** | 실행 중인 도구 호출, 최근 도구 이력, 활성 subagent |
+
+### Subagent activity
+
+확장 모드는 보이는 각 직접 자식마다 icon-first 행 하나를 표시합니다. 예: `◐ codex_cli_explore 2m14s ↳2`. 이름은 typed agent path의 마지막 부분이며, `↳N`은 모든 깊이에서 보이는 활성 하위 항목 수입니다. turn이 완료되거나 abort되면 즉시 사라지지만, 활성 하위 항목이 남아 있으면 직접 자식 집계 행은 유지됩니다. authoritative rollout 또는 metadata 추적에 실패하면 `✗ <name> tracking error`를 표시하고, 복구될 때까지 같은 typed child path만 다시 시도합니다.
+
+compact 모드는 `Agents: N`을 표시합니다. `N`은 확장 모드의 직접 자식 행 수가 아니라 root가 소유한 전체 트리에서 보이는 agent node 수입니다. 멀티 세션 개요는 해당 activity가 소유 root session에 이미 표시되므로 typed subagent session을 제외합니다.
+
+`CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS`는 running turn의 비활성 창을 제어합니다. 기본값은 `900000` ms(15분)이며 밀리초 단위의 양의 safe integer만 허용합니다. 빈 값, 잘못된 값, 0, 음수, 소수 또는 unsafe integer는 시작 시 오류로 종료됩니다. 이 timeout은 오래된 표시만 숨기며 agent를 중단하지 않고 hung 또는 crash를 증명할 수 없습니다. `starting`과 `tracking error`는 timeout되지 않습니다.
 
 ## 사용법
 
@@ -139,6 +154,7 @@ codex-hud --self-check       # 환경 진단 실행
 | `CODEX_HUD_AUTO_ATTACH` | `0` | 같은 디렉토리의 최신 세션에 자동 연결 |
 | `CODEX_HUD_ALTERNATE_SCREEN` | `0` | codex 패인의 tmux alternate-screen |
 | `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | 첫 렌더링 시 스크롤백 초기화 |
+| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | running agent 표시 timeout; 양의 safe integer 밀리초 값만 허용 |
 | `CODEX_HUD_CWD` | (미설정) | 작업 디렉토리 재정의 |
 | `CODEX_HOME` | `~/.codex` | Codex 홈 디렉토리 |
 | `CODEX_SESSIONS_PATH` | (미설정) | sessions 디렉토리 재정의 |

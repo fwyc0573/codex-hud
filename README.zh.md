@@ -1,3 +1,9 @@
+## 修改历史
+
+| 日期       | 修改摘要 |
+|------------|----------|
+| 2026-07-12 | 记录权威 subagent 活动、timeout 语义与概览过滤行为。 |
+
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -86,6 +92,7 @@ mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
 Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ Edit: file.ts | ✓ Read ×3
+◐ codex_cli_explore 2m14s ↳2
 ```
 
 | 行 | 内容 |
@@ -94,7 +101,15 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 | **环境** | 配置数、工作模式、MCP 服务器、指令文件、审批/沙箱策略 |
 | **Tokens** | 总 token（输入/cache/输出拆分）、context 填充率、compact 次数 |
 | **Session** | 工作目录、Session ID、CLI 版本 |
-| **活动** | 正在执行的工具调用、最近工具调用历史 |
+| **活动** | 正在执行的工具调用、最近工具调用历史和活跃 subagent |
+
+### Subagent 活动
+
+展开模式为每个可见的直接子节点显示一行 icon-first 状态，例如 `◐ codex_cli_explore 2m14s ↳2`。名称取自 typed agent path 的最后一段；`↳N` 表示任意深度下可见的活跃后代数量。turn 完成或 abort 后会立即消失；只有仍有活跃后代时，直接子节点的聚合行才会继续保留。权威 rollout 或 metadata 跟踪失败会显示为 `✗ <name> tracking error`，并持续重试同一条 typed child path，直到恢复。
+
+紧凑模式显示 `Agents: N`；`N` 统计 root 所拥有整棵树中的所有可见 agent 节点，而不只是展开模式中的直接子节点行。多 Session 概览会排除 typed subagent session，因为它们的活动已经归入所属 root session。
+
+`CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` 控制 running turn 的不活跃窗口。默认值为 `900000` ms（15 分钟），只接受以毫秒表示的正 safe integer；空值、无效值、零、负数、小数或 unsafe integer 会在启动时直接报错。timeout 只隐藏陈旧的界面显示，不会中断 agent，也不能证明 agent 已卡死或 crash。`starting` 和 `tracking error` 不受该 timeout 影响。
 
 ## 使用方法
 
@@ -139,6 +154,7 @@ codex-hud --self-check       # 运行环境诊断
 | `CODEX_HUD_AUTO_ATTACH` | `0` | 自动复用同目录最新会话 |
 | `CODEX_HUD_ALTERNATE_SCREEN` | `0` | codex pane 的 tmux alternate-screen |
 | `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | 首次渲染时清理 scrollback |
+| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | running agent 的界面 timeout；只接受正 safe integer 毫秒值 |
 | `CODEX_HUD_CWD` | （未设置） | 覆盖工作目录 |
 | `CODEX_HOME` | `~/.codex` | Codex home 目录 |
 | `CODEX_SESSIONS_PATH` | （未设置） | 覆盖 sessions 目录 |

@@ -118,14 +118,48 @@ export function createAgentState(
 function requireRecordTimestampMs(record: JsonRecord): number {
   if (typeof record.timestamp !== 'string') {
     throw new Error(
-      'Invalid agent lifecycle record: timestamp must be a valid date string.'
+      'Invalid agent lifecycle record: timestamp must be a valid RFC3339 date-time string.'
+    );
+  }
+
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(
+      record.timestamp
+    );
+  if (!match) {
+    throw new Error(
+      'Invalid agent lifecycle record: timestamp must be a valid RFC3339 date-time string.'
+    );
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    isLeapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) {
+    throw new Error(
+      'Invalid agent lifecycle record: timestamp must be a valid RFC3339 date-time string.'
     );
   }
 
   const timestampMs = Date.parse(record.timestamp);
   if (!Number.isFinite(timestampMs)) {
     throw new Error(
-      'Invalid agent lifecycle record: timestamp must be a valid date string.'
+      'Invalid agent lifecycle record: timestamp must be a valid RFC3339 date-time string.'
     );
   }
 

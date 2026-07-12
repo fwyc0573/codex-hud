@@ -155,6 +155,39 @@ check('null started_at with an invalid outer timestamp fails explicitly', () => 
   assert.equal(starting.lifecycle, 'starting');
 });
 
+check('null and absent started_at reject non-RFC3339 outer timestamps', () => {
+  const starting = makeState({ threadId: 'direct', parentThreadId: 'root' });
+  const invalidTimestamps = [
+    '0',
+    '07/12/2026',
+    '2026-07-12',
+    '2026-02-30T01:02:03.456Z',
+  ];
+
+  for (const timestamp of invalidTimestamps) {
+    assert.throws(
+      () =>
+        reduceAgentLifecycleRecord(
+          starting,
+          taskStarted({ turnId: 'turn-null', startedAt: null, timestamp })
+        ),
+      /timestamp/i
+    );
+
+    const missingStartedAtRecord = taskStarted({
+      turnId: 'turn-missing',
+      timestamp,
+    });
+    delete missingStartedAtRecord.payload.started_at;
+    assert.throws(
+      () => reduceAgentLifecycleRecord(starting, missingStartedAtRecord),
+      /timestamp/i
+    );
+  }
+
+  assert.equal(starting.lifecycle, 'starting');
+});
+
 check('only a matching complete terminates the active turn', () => {
   const running = makeState({
     threadId: 'direct',
@@ -292,6 +325,28 @@ check('a new complete local record restores visibility without resetting start',
     timestamp: '1970-01-01T00:15:00.000Z',
     type: 'event_msg',
     payload: { type: 'token_count' },
+  });
+
+  assert.equal(refreshed.startedAtMs, 1_000);
+  assert.equal(refreshed.lastCompleteLocalRecordAtMs, 900_000);
+  assert.equal(isRunningVisible(refreshed, 900_000, 900_000), true);
+});
+
+check('a non-event complete record restores visibility without resetting start', () => {
+  const hidden = makeState({
+    threadId: 'direct',
+    parentThreadId: 'root',
+    lifecycle: 'running',
+    activeTurnId: 'turn-active',
+    startedAtMs: 1_000,
+    lastCompleteLocalRecordAtMs: 0,
+  });
+  assert.equal(isRunningVisible(hidden, 900_000, 900_000), false);
+
+  const refreshed = reduceAgentLifecycleRecord(hidden, {
+    timestamp: '1970-01-01T00:15:00.000Z',
+    type: 'response_item',
+    payload: { type: 'message', role: 'assistant' },
   });
 
   assert.equal(refreshed.startedAtMs, 1_000);

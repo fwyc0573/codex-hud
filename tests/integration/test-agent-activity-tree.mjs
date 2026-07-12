@@ -777,13 +777,8 @@ try {
     const validResolverAttempts = calls.filter((id) => id === VALID_CHILD).length;
     const partialVisibleCount = second.activity?.visibleAgentCount ?? 0;
     const partialRowCount = second.activity?.rows.length ?? 0;
-
-    console.log(
-      `METRIC root-batch-transaction firstRejects=${firstRejects} ` +
-        `secondRejects=${secondRejects} validResolverAttempts=${validResolverAttempts} ` +
-        `partialVisibleCount=${partialVisibleCount} partialRowCount=${partialRowCount}`
-    );
     assert.match(first.error?.message ?? '', /agentPath leaf/);
+    assert.match(second.error?.message ?? '', /agentPath leaf/);
     assert.equal(
       firstRejects,
       1,
@@ -808,6 +803,77 @@ try {
       partialRowCount,
       0,
       `root partial row count: expected=0 actual=${partialRowCount}`
+    );
+
+    overwriteRolloutRecords(rootPath, [
+      canonicalSessionMeta({ id: ROOT }),
+      taskStarted({
+        turnId: rootTurn,
+        startedAt: 70,
+        timestamp: timestamp(70_000),
+      }),
+      legacyAgentStart({
+        eventId: 'call_root_transaction_valid',
+        childThreadId: VALID_CHILD,
+        agentPath: '/root/valid_child',
+        occurredAtMs: 70_100,
+        timestamp: timestamp(70_100),
+      }),
+      legacyAgentStart({
+        eventId: 'call_root_transaction_same_id_duplicate',
+        childThreadId: VALID_CHILD,
+        agentPath: '/root/',
+        occurredAtMs: 70_200,
+        timestamp: timestamp(70_200),
+      }),
+    ]);
+    const repaired = await collector.collect(71_100);
+    const resolverAttemptsAfterRepair = calls.filter(
+      (id) => id === VALID_CHILD
+    ).length;
+    const idle = await collector.collect(71_100);
+    const resolverAttemptsAfterIdleRepoll = calls.filter(
+      (id) => id === VALID_CHILD
+    ).length;
+    const repairedVisibleCount = repaired.visibleAgentCount;
+    const repairedRowCount = repaired.rows.length;
+    const repairedRow = repaired.rows[0];
+    assert.equal(
+      repairedVisibleCount,
+      1,
+      `root repaired visible count: expected=1 actual=${repairedVisibleCount}`
+    );
+    assert.equal(
+      repairedRowCount,
+      1,
+      `root repaired row count: expected=1 actual=${repairedRowCount}`
+    );
+    assert.equal(
+      resolverAttemptsAfterRepair,
+      1,
+      `root valid child resolver attempts after repair: expected=1 actual=${resolverAttemptsAfterRepair}`
+    );
+    assert.equal(
+      resolverAttemptsAfterIdleRepoll,
+      1,
+      `root valid child resolver attempts after idle re-poll: expected=1 actual=${resolverAttemptsAfterIdleRepoll}`
+    );
+    assert.equal(idle.visibleAgentCount, 1);
+    assert.equal(repairedRow?.threadId, VALID_CHILD);
+    assert.equal(repairedRow?.agentPath, '/root/valid_child');
+    assert.equal(
+      repairedRow?.label,
+      'valid_child',
+      `root first-registration label: expected=valid_child actual=${repairedRow?.label}`
+    );
+
+    console.log(
+      `METRIC root-batch-transaction firstRejects=${firstRejects} ` +
+        `secondRejects=${secondRejects} attemptsBeforeRepair=${validResolverAttempts} ` +
+        `partialVisibleCount=${partialVisibleCount} partialRowCount=${partialRowCount} ` +
+        `repairedVisibleCount=${repairedVisibleCount} repairedRowCount=${repairedRowCount} ` +
+        `attemptsAfterRepair=${resolverAttemptsAfterRepair} ` +
+        `attemptsAfterIdleRepoll=${resolverAttemptsAfterIdleRepoll}`
     );
   });
 

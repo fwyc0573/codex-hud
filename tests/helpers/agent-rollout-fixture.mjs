@@ -191,3 +191,35 @@ export function writeRolloutFile(
   fs.writeFileSync(filePath, contents.length > 0 ? `${contents}\n` : '', 'utf8');
   return filePath;
 }
+
+export function appendRolloutRecords(filePath, records) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return;
+  }
+
+  fs.appendFileSync(
+    filePath,
+    `${records.map((record) => JSON.stringify(record)).join('\n')}\n`,
+    'utf8'
+  );
+}
+
+export function appendRolloutText(filePath, text) {
+  fs.appendFileSync(filePath, text, 'utf8');
+}
+
+export function overwriteRolloutRecords(filePath, records) {
+  const contents = records.map((record) => JSON.stringify(record)).join('\n');
+  fs.writeFileSync(filePath, contents.length > 0 ? `${contents}\n` : '', 'utf8');
+}
+
+export function rolloutSessionFile(filePath, sessionId) {
+  const stats = fs.statSync(filePath);
+  return {
+    path: filePath,
+    sessionId,
+    timestamp: new Date('2026-07-12T00:00:00.000Z'),
+    size: stats.size,
+    modifiedAt: stats.mtime,
+  };
+}

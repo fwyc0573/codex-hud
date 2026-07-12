@@ -4,8 +4,107 @@
  * Shows current and recent tool/agent activity
  */
 
-import { theme, colors, icons, getSpinnerFrame, truncate } from '../colors.js';
-import type { HudData, ToolActivity, ToolCall, PlanProgress } from '../../types.js';
+import {
+  theme,
+  colors,
+  icons,
+  getSpinnerFrame,
+  truncate,
+  truncateAnsi,
+  visualLength,
+} from '../colors.js';
+import type {
+  AgentActivity,
+  AgentActivityRow,
+  HudData,
+  ToolActivity,
+  ToolCall,
+  PlanProgress,
+} from '../../types.js';
+
+const DESCENDANT_PREFIX = '↳';
+
+export function formatAgentElapsed(startedAt: Date, nowMs: number = Date.now()): string {
+  const startedAtMs = startedAt.getTime();
+  if (!Number.isFinite(startedAtMs)) {
+    throw new Error('Agent elapsed startedAt must be a valid Date');
+  }
+  if (!Number.isFinite(nowMs)) {
+    throw new Error('Agent elapsed nowMs must be finite');
+  }
+  if (nowMs < startedAtMs) {
+    throw new Error('Agent elapsed nowMs cannot be before startedAt');
+  }
+
+  const elapsedSeconds = Math.floor((nowMs - startedAtMs) / 1000);
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    const seconds = elapsedSeconds % 60;
+    return `${elapsedMinutes}m${seconds.toString().padStart(2, '0')}s`;
+  }
+
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  return `${hours}h${minutes.toString().padStart(2, '0')}m`;
+}
+
+function renderAgentRow(
+  icon: string,
+  label: string,
+  suffix: string,
+  color: (text: string) => string,
+  width: number
+): string {
+  const fixedWidth = visualLength(icon) + 1 + visualLength(suffix);
+  const plain = width >= fixedWidth + 1
+    ? `${icon} ${truncate(label, width - fixedWidth)}${suffix}`
+    : `${icon} ${label}${suffix}`;
+  return truncateAnsi(color(plain), width);
+}
+
+function renderAgentActivityRow(row: AgentActivityRow, width: number, nowMs: number): string {
+  if (row.status === 'tracking-error') {
+    return renderAgentRow(icons.cross, row.label, ' tracking error', theme.error, width);
+  }
+  if (row.status !== 'starting' && row.status !== 'running') {
+    throw new Error(`Unknown agent display status: ${String(row.status)}`);
+  }
+  if (!row.elapsedStartedAt) {
+    throw new Error(`Agent ${row.threadId} ${row.status} row requires elapsedStartedAt`);
+  }
+
+  const spinnerIndex = Math.floor(nowMs / 100) % icons.spinner.length;
+  const spinner = getSpinnerFrame(spinnerIndex);
+  const elapsed = formatAgentElapsed(row.elapsedStartedAt, nowMs);
+  const descendants = row.activeDescendantCount > 0
+    ? ` ${DESCENDANT_PREFIX}${row.activeDescendantCount}`
+    : '';
+  return renderAgentRow(
+    spinner,
+    row.label,
+    ` ${elapsed}${descendants}`,
+    theme.agentRunning,
+    width
+  );
+}
+
+export function renderAgentLines(
+  agentActivity: AgentActivity | undefined,
+  width: number,
+  nowMs: number = Date.now()
+): string[] {
+  if (!agentActivity) {
+    return [];
+  }
+  if (agentActivity.rootTrackingError) {
+    return [renderAgentRow(icons.cross, 'agent', ' tracking error', theme.error, width)];
+  }
+  return agentActivity.rows.map((row) => renderAgentActivityRow(row, width, nowMs));
+}
 
 /**
  * Truncate a target string for display
@@ -291,7 +390,7 @@ export function renderSessionDetailLine(data: HudData): string | null {
   return parts.length > 0 ? parts.join(` ${colors.dim(icons.pipe)} `) : null;
 }
 
-export function collectActivityLines(data: HudData): string[] {
+export function collectActivityLines(data: HudData, width?: number): string[] {
   const lines: string[] = [];
 
   const tokenLine = renderTokenLine(data);
@@ -309,6 +408,8 @@ export function collectActivityLines(data: HudData): string[] {
   if (toolsLine) {
     lines.push(toolsLine);
   }
+
+  lines.push(...renderAgentLines(data.agentActivity, width ?? Number.MAX_SAFE_INTEGER));
   
   // Todos/plan line
   const todosLine = renderTodosLine(data.planProgress);

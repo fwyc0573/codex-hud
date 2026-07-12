@@ -13,5 +13,7 @@ export {
   renderTodosLine, 
   renderTokenLine,
   renderSessionDetailLine,
+  formatAgentElapsed,
+  renderAgentLines,
   collectActivityLines 
 } from './activity-line.js';

@@ -159,6 +159,40 @@ assert.throws(
   /elapsedStartedAt/,
   'normal rows without a timer must fail fast'
 );
+assert.throws(
+  () => renderAgentLines(
+    makeAgentActivity({ rows: [makeRow({ status: 'completed' })] }),
+    80,
+    134000
+  ),
+  { message: 'Unknown agent display status: completed' },
+  'unknown runtime statuses must fail fast with the offending value'
+);
+
+const spinnerCases = [
+  { nowMs: 0, expected: '◐' },
+  { nowMs: 99, expected: '◐' },
+  { nowMs: 100, expected: '◓' },
+  { nowMs: 199, expected: '◓' },
+  { nowMs: 200, expected: '◑' },
+  { nowMs: 299, expected: '◑' },
+  { nowMs: 300, expected: '◒' },
+  { nowMs: 399, expected: '◒' },
+  { nowMs: 400, expected: '◐' },
+];
+
+for (const testCase of spinnerCases) {
+  const [rendered] = renderAgentLines(
+    makeAgentActivity({ rows: [makeRow()] }),
+    80,
+    testCase.nowMs
+  );
+  assert.equal(
+    [...stripAnsi(rendered)][0],
+    testCase.expected,
+    `spinner frame at ${testCase.nowMs} ms`
+  );
+}
 
 // Starting and running rows share the deterministic spinner presentation.
 for (const status of ['starting', 'running']) {
@@ -398,6 +432,20 @@ const summaryWidth = visualLength(compactCount);
 const identityWidth = visualLength(renderIdentityLine(compactData, compactLayout, { maxWidth: 200 }));
 const separatorWidth = visualLength(theme.separator(' │ '));
 const noProjectWidth = identityWidth + separatorWidth + summaryWidth;
+const smallProjectBudget = 8;
+const shortenedProjectWidth = identityWidth
+  + summaryWidth
+  + (2 * separatorWidth)
+  + smallProjectBudget;
+const shortenedProject = renderHud(
+  compactData,
+  { width: shortenedProjectWidth, showDetails: false, layout: compactLayout }
+)[0];
+assert.ok(smallProjectBudget > 0, 'project shortening case reserves a positive project budget');
+assert.equal(visualLength(shortenedProject), shortenedProjectWidth);
+assert.match(stripAnsi(shortenedProject), /very-lo…/, 'the shortened project remains visible');
+assert.match(stripAnsi(shortenedProject), /Agents: 3/);
+
 const withoutProject = renderHud(
   compactData,
   { width: noProjectWidth, showDetails: false, layout: compactLayout }
@@ -427,11 +475,20 @@ const unshrinkableProject = {
     isGitRepo: true,
   },
 };
+const overWideProject = renderProjectLine(unshrinkableProject, {
+  includeFileStats: false,
+  maxWidth: 1,
+});
+assert.ok(
+  visualLength(overWideProject) > 1,
+  'the project helper demonstrably exceeds an unshrinkable one-column budget'
+);
+const reservedCompactWidth = identityWidth + summaryWidth + (2 * separatorWidth) + 1;
 const recheckedCompact = renderHud(
   unshrinkableProject,
-  { width: noProjectWidth, showDetails: false, layout: compactLayout }
+  { width: reservedCompactWidth, showDetails: false, layout: compactLayout }
 )[0];
-assert.ok(visualLength(recheckedCompact) <= noProjectWidth, 'compact composition rechecks project width');
+assert.ok(visualLength(recheckedCompact) <= reservedCompactWidth, 'compact composition rechecks project width');
 assert.match(stripAnsi(recheckedCompact), /Agents: 3/);
 assert.doesNotMatch(stripAnsi(recheckedCompact), /branch-that-cannot-fit/);
 
@@ -531,6 +588,12 @@ const metrics = {
   visiblePhysicalLinesActual: physicalLines.length,
   hiddenPhysicalLinesExpected: 3,
   hiddenPhysicalLinesActual: Number(finalPhysicalLine.match(/…(\d+) more lines hidden/)?.[1]),
+  spinnerBoundaryCasesExpected: 9,
+  spinnerBoundaryCasesActual: spinnerCases.length,
+  shortenedProjectBudgetExpected: 8,
+  shortenedProjectBudgetActual: smallProjectBudget,
+  overWideProjectLimit: 1,
+  overWideProjectActual: visualLength(overWideProject),
   normalPlain: stripAnsi(normalWidth20),
   errorPlain: stripAnsi(errorWidth24),
 };

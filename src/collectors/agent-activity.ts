@@ -484,9 +484,7 @@ interface RootTracker {
   offset: number;
   physicalTurnIds: Set<string>;
   canonicalValidated: boolean;
-  localBoundaryFound: boolean;
   forkedFromId: string | null;
-  sourceRolloutPath: string | null;
   trackingError: string | null;
 }
 
@@ -499,7 +497,6 @@ interface TrackedAgentNode extends AgentState {
 }
 
 interface RootForkBoundary {
-  sourceRolloutPath: string;
   localBoundaryIndex: number;
 }
 
@@ -692,9 +689,7 @@ export class AgentActivityCollector {
           offset: 0,
           physicalTurnIds: new Set<string>(),
           canonicalValidated: false,
-          localBoundaryFound: false,
           forkedFromId: null,
-          sourceRolloutPath: null,
           trackingError: null,
         }
       : null;
@@ -784,8 +779,6 @@ export class AgentActivityCollector {
             candidate.forkedFromId,
             batch.records
           );
-          candidate.localBoundaryFound = true;
-          candidate.sourceRolloutPath = boundary.sourceRolloutPath;
           eligibleStartIndex = boundary.localBoundaryIndex;
         } catch (error) {
           this.setRootTrackingError(
@@ -793,8 +786,6 @@ export class AgentActivityCollector {
           );
           return false;
         }
-      } else {
-        candidate.localBoundaryFound = true;
       }
     }
 
@@ -806,13 +797,12 @@ export class AgentActivityCollector {
       }
     }
 
+    const stagedNodes = this.stageSeeds(seeds, candidate.session.sessionId);
     candidate.offset = batch.nextOffset;
     candidate.trackingError = null;
     this.root = candidate;
+    this.applyStagedNodes(stagedNodes);
     this.clearRootTrackingError(root.trackingError, candidate.forkedFromId);
-    for (const seed of seeds) {
-      this.registerSeed(seed, candidate.session.sessionId);
-    }
     return true;
   }
 
@@ -843,7 +833,6 @@ export class AgentActivityCollector {
     }
 
     return {
-      sourceRolloutPath: source.path,
       localBoundaryIndex,
     };
   }
@@ -933,30 +922,46 @@ export class AgentActivityCollector {
         }
       }
 
+      const stagedNodes = this.stageSeeds(seeds, candidate.threadId);
       candidate.offset = batch.nextOffset;
       candidate.trackingError = null;
-      this.commitNodeSuccess(current, candidate);
-      for (const seed of seeds) {
-        this.registerSeed(seed, candidate.threadId);
-      }
+      this.commitNodeSuccess(current, candidate, stagedNodes);
     } catch (error) {
       this.setNodeTrackingError(current, errorMessage(error));
     }
   }
 
-  private registerSeed(seed: AgentSpawnSeed, parentThreadId: string): void {
-    if (this.nodes.has(seed.childThreadId)) {
-      return;
-    }
+  private stageSeeds(
+    seeds: readonly AgentSpawnSeed[],
+    parentThreadId: string
+  ): TrackedAgentNode[] {
+    const stagedNodes: TrackedAgentNode[] = [];
+    const stagedThreadIds = new Set<string>();
+    for (const seed of seeds) {
+      if (
+        this.nodes.has(seed.childThreadId) ||
+        stagedThreadIds.has(seed.childThreadId)
+      ) {
+        continue;
+      }
 
-    this.nodes.set(seed.childThreadId, {
-      ...createAgentState(seed, parentThreadId),
-      rolloutPath: null,
-      offset: 0,
-      physicalTurnIds: new Set<string>(),
-      canonicalValidated: false,
-      localBoundaryFound: false,
-    });
+      stagedNodes.push({
+        ...createAgentState(seed, parentThreadId),
+        rolloutPath: null,
+        offset: 0,
+        physicalTurnIds: new Set<string>(),
+        canonicalValidated: false,
+        localBoundaryFound: false,
+      });
+      stagedThreadIds.add(seed.childThreadId);
+    }
+    return stagedNodes;
+  }
+
+  private applyStagedNodes(stagedNodes: readonly TrackedAgentNode[]): void {
+    for (const node of stagedNodes) {
+      this.nodes.set(node.threadId, node);
+    }
   }
 
   private setNodeTrackingError(
@@ -978,9 +983,11 @@ export class AgentActivityCollector {
 
   private commitNodeSuccess(
     previous: TrackedAgentNode,
-    candidate: TrackedAgentNode
+    candidate: TrackedAgentNode,
+    stagedNodes: readonly TrackedAgentNode[] = []
   ): void {
     this.nodes.set(candidate.threadId, candidate);
+    this.applyStagedNodes(stagedNodes);
     if (previous.trackingError !== null) {
       this.logError(`Agent ${candidate.threadId} tracking recovered.`);
     }

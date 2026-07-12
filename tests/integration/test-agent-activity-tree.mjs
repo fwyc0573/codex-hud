@@ -649,7 +649,28 @@ try {
     const malformedRecoveries = logs.filter(
       (message) => message.includes(PARTIAL_CHILD) && message.includes('recovered')
     ).length;
+    const descendantIds = [GRANDCHILD_A, PARTIAL_CHILD, TRANSACTION_CHILD];
+    const descendantsDiscovered = descendantIds.filter((id) =>
+      resolverCalls.includes(id)
+    ).length;
+    const assertedPhysicalInheritedTurnIdCases = [
+      sourceTurn,
+      rootTurn,
+      directATurn,
+    ].length;
+    const followUpReappearances = Number(
+      followUp.visibleAgentCount === 1 && followUp.rows[0]?.threadId === DIRECT_B
+    );
+    const timeoutHides = Number(timedOut.visibleAgentCount === 0);
+    const activityRecoveries = Number(
+      activityRecovered.visibleAgentCount === 1 &&
+        activityRecovered.rows[0]?.threadId === DIRECT_B
+    );
+    const rootResets = Number(
+      reset.visibleAgentCount === 1 && reset.rows[0]?.threadId === NEW_CHILD
+    );
     assert.equal(localRegistrations, 6);
+    assert.equal(descendantsDiscovered, 3);
     assert.equal(copiedLegacyRegistrations, 0);
     assert.equal(copiedPaginatedRegistrations, 0);
     assert.equal(falseCopiedErrors, 0);
@@ -658,17 +679,380 @@ try {
     assert.equal(missingRecoveries, 1);
     assert.equal(malformedErrors, 2);
     assert.equal(malformedRecoveries, 2);
+    assert.equal(followUpReappearances, 1);
+    assert.equal(timeoutHides, 1);
+    assert.equal(activityRecoveries, 1);
+    assert.equal(rootResets, 1);
 
     console.log(
       `METRIC recursive-tree localRegistrations=${localRegistrations} ` +
-        'descendantsDiscovered=3 physicalInheritedTurnIds=3 ' +
+        `descendantsDiscovered=${descendantsDiscovered} ` +
+        `assertedPhysicalInheritedTurnIdCases=${assertedPhysicalInheritedTurnIdCases} ` +
         `copiedLegacyRegistrations=${copiedLegacyRegistrations} ` +
         `copiedPaginatedRegistrations=${copiedPaginatedRegistrations} ` +
         `falseCopiedErrors=${falseCopiedErrors} ` +
         `duplicateRegistrations=${duplicateRegistrations} ` +
         `missingErrors=${missingErrors} missingRecoveries=${missingRecoveries} ` +
         `malformedErrors=${malformedErrors} malformedRecoveries=${malformedRecoveries} ` +
-        'followUpReappearances=1 timeoutHides=1 activityRecoveries=1 rootResets=1'
+        `followUpReappearances=${followUpReappearances} timeoutHides=${timeoutHides} ` +
+        `activityRecoveries=${activityRecoveries} rootResets=${rootResets}`
+    );
+  });
+
+  await check('does not commit a root batch until every first-seen seed validates', async () => {
+    const ROOT = thread(300);
+    const VALID_CHILD = thread(301);
+    const INVALID_CHILD = thread(302);
+    const rootTurn = 'root-transaction-turn';
+    const validTurn = 'root-transaction-valid-turn';
+    const rootPath = writeRolloutFile(testRoot, {
+      sessionId: ROOT,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-00-00',
+      records: [
+        canonicalSessionMeta({ id: ROOT }),
+        taskStarted({
+          turnId: rootTurn,
+          startedAt: 70,
+          timestamp: timestamp(70_000),
+        }),
+        legacyAgentStart({
+          eventId: 'call_root_transaction_valid',
+          childThreadId: VALID_CHILD,
+          agentPath: '/root/valid_child',
+          occurredAtMs: 70_100,
+          timestamp: timestamp(70_100),
+        }),
+        legacyAgentStart({
+          eventId: 'call_root_transaction_invalid',
+          childThreadId: INVALID_CHILD,
+          agentPath: '/root/invalid_child/',
+          occurredAtMs: 70_200,
+          timestamp: timestamp(70_200),
+        }),
+      ],
+    });
+    const validChildPath = writeRolloutFile(testRoot, {
+      sessionId: VALID_CHILD,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-01-00',
+      records: [
+        childMeta({
+          id: VALID_CHILD,
+          parentThreadId: ROOT,
+          agentPath: '/root/valid_child',
+        }),
+        taskStarted({
+          turnId: rootTurn,
+          startedAt: 70,
+          timestamp: timestamp(70_000),
+        }),
+        taskStarted({
+          turnId: validTurn,
+          startedAt: 71,
+          timestamp: timestamp(71_000),
+        }),
+      ],
+    });
+    const files = new Map([[VALID_CHILD, { path: validChildPath }]]);
+    const calls = [];
+    const collector = new AgentActivityCollector({
+      inactivityTimeoutMs: 1_000,
+      resolveRollout: createResolver(files, calls),
+      logError: () => {},
+    });
+    collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+
+    const captureCollect = async () => {
+      try {
+        return { activity: await collector.collect(71_100), error: null };
+      } catch (error) {
+        return { activity: null, error };
+      }
+    };
+    const first = await captureCollect();
+    const second = await captureCollect();
+    const firstRejects = Number(first.error !== null);
+    const secondRejects = Number(second.error !== null);
+    const validResolverAttempts = calls.filter((id) => id === VALID_CHILD).length;
+    const partialVisibleCount = second.activity?.visibleAgentCount ?? 0;
+    const partialRowCount = second.activity?.rows.length ?? 0;
+
+    console.log(
+      `METRIC root-batch-transaction firstRejects=${firstRejects} ` +
+        `secondRejects=${secondRejects} validResolverAttempts=${validResolverAttempts} ` +
+        `partialVisibleCount=${partialVisibleCount} partialRowCount=${partialRowCount}`
+    );
+    assert.match(first.error?.message ?? '', /agentPath leaf/);
+    assert.equal(
+      firstRejects,
+      1,
+      `root first rejection: expected=1 actual=${firstRejects}`
+    );
+    assert.equal(
+      secondRejects,
+      1,
+      `root unchanged replay rejection: expected=1 actual=${secondRejects}`
+    );
+    assert.equal(
+      validResolverAttempts,
+      0,
+      `root valid child resolver attempts before repair: expected=0 actual=${validResolverAttempts}`
+    );
+    assert.equal(
+      partialVisibleCount,
+      0,
+      `root partial visible count: expected=0 actual=${partialVisibleCount}`
+    );
+    assert.equal(
+      partialRowCount,
+      0,
+      `root partial row count: expected=0 actual=${partialRowCount}`
+    );
+  });
+
+  await check('does not publish nested seeds before the parent batch commits', async () => {
+    const ROOT = thread(310);
+    const PARENT = thread(311);
+    const NESTED = thread(312);
+    const INVALID_NESTED = thread(313);
+    const rootTurn = 'node-transaction-root-turn';
+    const parentTurn = 'node-transaction-parent-turn';
+    const nestedTurn = 'node-transaction-nested-turn';
+    const parentSeed = legacyAgentStart({
+      eventId: 'call_node_transaction_parent',
+      childThreadId: PARENT,
+      agentPath: '/root/transaction_parent',
+      occurredAtMs: 80_100,
+      timestamp: timestamp(80_100),
+    });
+    const nestedSeed = legacyAgentStart({
+      eventId: 'call_node_transaction_nested',
+      childThreadId: NESTED,
+      agentPath: '/root/transaction_parent/nested',
+      occurredAtMs: 81_100,
+      timestamp: timestamp(81_100),
+    });
+    const invalidNestedSeed = legacyAgentStart({
+      eventId: 'call_node_transaction_invalid',
+      childThreadId: INVALID_NESTED,
+      agentPath: '/root/transaction_parent/invalid/',
+      occurredAtMs: 81_200,
+      timestamp: timestamp(81_200),
+    });
+    const duplicateNestedSeed = legacyAgentStart({
+      eventId: 'call_node_transaction_duplicate',
+      childThreadId: NESTED,
+      agentPath: '/root/transaction_parent/ignored_duplicate/',
+      occurredAtMs: 81_300,
+      timestamp: timestamp(81_300),
+    });
+    const rootPath = writeRolloutFile(testRoot, {
+      sessionId: ROOT,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-10-00',
+      records: [
+        canonicalSessionMeta({ id: ROOT }),
+        taskStarted({
+          turnId: rootTurn,
+          startedAt: 80,
+          timestamp: timestamp(80_000),
+        }),
+        parentSeed,
+      ],
+    });
+    const parentRecords = [
+      childMeta({
+        id: PARENT,
+        parentThreadId: ROOT,
+        agentPath: '/root/transaction_parent',
+      }),
+      taskStarted({
+        turnId: rootTurn,
+        startedAt: 80,
+        timestamp: timestamp(80_000),
+      }),
+      taskStarted({
+        turnId: parentTurn,
+        startedAt: 81,
+        timestamp: timestamp(81_000),
+      }),
+      nestedSeed,
+    ];
+    const parentPath = writeRolloutFile(testRoot, {
+      sessionId: PARENT,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-11-00',
+      records: [...parentRecords, invalidNestedSeed],
+    });
+    const nestedPath = writeRolloutFile(testRoot, {
+      sessionId: NESTED,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-12-00',
+      records: [
+        childMeta({
+          id: NESTED,
+          parentThreadId: PARENT,
+          agentPath: '/root/transaction_parent/nested',
+          depth: 2,
+        }),
+        taskStarted({
+          turnId: parentTurn,
+          startedAt: 81,
+          timestamp: timestamp(81_000),
+        }),
+        taskStarted({
+          turnId: nestedTurn,
+          startedAt: 82,
+          timestamp: timestamp(82_000),
+        }),
+      ],
+    });
+    const files = new Map([
+      [PARENT, { path: parentPath }],
+      [NESTED, { path: nestedPath }],
+    ]);
+    const calls = [];
+    const logs = [];
+    const collector = new AgentActivityCollector({
+      inactivityTimeoutMs: 2_000,
+      resolveRollout: createResolver(files, calls),
+      logError: (message) => logs.push(message),
+    });
+    collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+
+    const rejected = await collector.collect(82_100);
+    const nestedAttemptsBeforeRepair = calls.filter((id) => id === NESTED).length;
+    const visibleCountBeforeRepair = rejected.visibleAgentCount;
+    const activeDescendantsBeforeRepair = rejected.rows[0]?.activeDescendantCount;
+    assert.equal(rejected.rows[0]?.status, 'tracking-error');
+    assert.equal(
+      visibleCountBeforeRepair,
+      1,
+      `node visible count before repair: expected=1 actual=${visibleCountBeforeRepair}`
+    );
+    assert.equal(
+      activeDescendantsBeforeRepair,
+      0,
+      `node active descendants before repair: expected=0 actual=${activeDescendantsBeforeRepair}`
+    );
+    assert.equal(
+      nestedAttemptsBeforeRepair,
+      0,
+      `nested resolver attempts before repair: expected=0 actual=${nestedAttemptsBeforeRepair}`
+    );
+
+    overwriteRolloutRecords(parentPath, [...parentRecords, duplicateNestedSeed]);
+    const recovered = await collector.collect(82_100);
+    const nestedAttemptsAfterRepair = calls.filter((id) => id === NESTED).length;
+    assert.equal(recovered.visibleAgentCount, 2);
+    assert.equal(recovered.rows[0]?.activeDescendantCount, 1);
+    assert.equal(
+      recovered.rows[0]?.status,
+      'running',
+      'the first same-batch nested seed must keep its immutable identity'
+    );
+    assert.equal(
+      nestedAttemptsAfterRepair,
+      1,
+      `nested resolver attempts after same-path repair: expected=1 actual=${nestedAttemptsAfterRepair}`
+    );
+    assert.equal(logCount(logs, PARENT), 2, 'one error and one recovery');
+
+    console.log(
+      `METRIC node-batch-transaction visibleBeforeRepair=${visibleCountBeforeRepair} ` +
+        `activeDescendantsBeforeRepair=${activeDescendantsBeforeRepair} ` +
+        `nestedAttemptsBeforeRepair=${nestedAttemptsBeforeRepair} ` +
+        `nestedAttemptsAfterRepair=${nestedAttemptsAfterRepair}`
+    );
+  });
+
+  await check('inherits complete-only and abort-only physical lifecycle turn IDs', async () => {
+    const ROOT = thread(320);
+    const CHILD = thread(321);
+    const rootTurn = 'physical-root-turn';
+    const completeOnlyTurn = 'physical-complete-only-turn';
+    const abortOnlyTurn = 'physical-abort-only-turn';
+    const localTurn = 'physical-local-turn';
+    const rootPath = writeRolloutFile(testRoot, {
+      sessionId: ROOT,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-20-00',
+      records: [
+        canonicalSessionMeta({ id: ROOT }),
+        taskStarted({
+          turnId: rootTurn,
+          startedAt: 90,
+          timestamp: timestamp(90_000),
+        }),
+        taskComplete({
+          turnId: completeOnlyTurn,
+          timestamp: timestamp(90_100),
+        }),
+        turnAborted({
+          turnId: abortOnlyTurn,
+          timestamp: timestamp(90_200),
+        }),
+        legacyAgentStart({
+          eventId: 'call_physical_child',
+          childThreadId: CHILD,
+          agentPath: '/root/physical_child',
+          occurredAtMs: 90_300,
+          timestamp: timestamp(90_300),
+        }),
+      ],
+    });
+    const childPath = writeRolloutFile(testRoot, {
+      sessionId: CHILD,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-21-00',
+      records: [
+        childMeta({
+          id: CHILD,
+          parentThreadId: ROOT,
+          agentPath: '/root/physical_child',
+        }),
+        taskStarted({
+          turnId: completeOnlyTurn,
+          startedAt: 90,
+          timestamp: timestamp(90_400),
+        }),
+        taskStarted({
+          turnId: abortOnlyTurn,
+          startedAt: 91,
+          timestamp: timestamp(91_000),
+        }),
+        taskStarted({
+          turnId: localTurn,
+          startedAt: 92,
+          timestamp: timestamp(92_000),
+        }),
+      ],
+    });
+    const calls = [];
+    const collector = new AgentActivityCollector({
+      inactivityTimeoutMs: 1_000,
+      resolveRollout: createResolver(new Map([[CHILD, { path: childPath }]]), calls),
+      logError: () => {},
+    });
+    collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+
+    const activity = await collector.collect(92_100);
+    const elapsedActual = activity.rows[0]?.elapsedStartedAt?.getTime();
+    assert.equal(activity.visibleAgentCount, 1);
+    assert.equal(
+      elapsedActual,
+      92_000,
+      `physical lifecycle boundary elapsed: expected=92000 actual=${elapsedActual}`
+    );
+    assert.equal(
+      calls.filter((id) => id === CHILD).length,
+      1,
+      `physical lifecycle child resolver attempts: expected=1 actual=${calls.filter((id) => id === CHILD).length}`
+    );
+    console.log(
+      `ASSERTED_CASE inherited-lifecycle completeOnly=1 abortOnly=1 ` +
+        `elapsedExpected=92000 elapsedActual=${elapsedActual}`
     );
   });
 
@@ -704,10 +1088,12 @@ try {
       relativeDir: '2026/07/12',
       timestampLabel: '2026-07-12T02-01-00',
       records: [
-        childMeta({ id: WRONG, parentThreadId: ROOT, agentPath: childPath }),
+        childMeta({ id: CHILD, parentThreadId: ROOT, agentPath: childPath }),
       ],
     });
-    const files = new Map([[CHILD, { path: rolloutPath }]]);
+    const files = new Map([
+      [CHILD, { path: rolloutPath, sessionId: WRONG }],
+    ]);
     const calls = [];
     const logs = [];
     const collector = new AgentActivityCollector({
@@ -726,6 +1112,16 @@ try {
     };
 
     await assertLocalError(1);
+    assert.equal(
+      logs.at(-1)?.includes('resolved rollout session mismatch'),
+      true,
+      `child resolver SessionFile.sessionId mismatch: expected=true actual=${logs.at(-1)?.includes('resolved rollout session mismatch')}`
+    );
+    files.set(CHILD, { path: rolloutPath });
+    overwriteRolloutRecords(rolloutPath, [
+      childMeta({ id: WRONG, parentThreadId: ROOT, agentPath: childPath }),
+    ]);
+    await assertLocalError(2);
     overwriteRolloutRecords(rolloutPath, [
       childMeta({
         id: CHILD,
@@ -733,7 +1129,7 @@ try {
         agentPath: childPath,
       }),
     ]);
-    await assertLocalError(2);
+    await assertLocalError(3);
     overwriteRolloutRecords(rolloutPath, [
       childMeta({
         id: CHILD,
@@ -741,7 +1137,7 @@ try {
         agentPath: '/root/wrong_path',
       }),
     ]);
-    await assertLocalError(3);
+    await assertLocalError(4);
     overwriteRolloutRecords(rolloutPath, [
       canonicalSessionMeta({
         id: CHILD,
@@ -750,7 +1146,7 @@ try {
         agentPath: childPath,
       }),
     ]);
-    await assertLocalError(4);
+    await assertLocalError(5);
     const duplicatedMismatch = childMeta({
       id: CHILD,
       parentThreadId: ROOT,
@@ -758,7 +1154,20 @@ try {
     });
     duplicatedMismatch.payload.parent_thread_id = WRONG;
     overwriteRolloutRecords(rolloutPath, [duplicatedMismatch]);
-    await assertLocalError(5);
+    await assertLocalError(6);
+    const duplicatedPathMismatch = childMeta({
+      id: CHILD,
+      parentThreadId: ROOT,
+      agentPath: childPath,
+    });
+    duplicatedPathMismatch.payload.agent_path = '/root/wrong_duplicate_path';
+    overwriteRolloutRecords(rolloutPath, [duplicatedPathMismatch]);
+    await assertLocalError(7);
+    assert.equal(
+      logs.at(-1)?.includes('duplicate agent_path mismatch'),
+      true,
+      `duplicate top-level payload.agent_path mismatch: expected=true actual=${logs.at(-1)?.includes('duplicate agent_path mismatch')}`
+    );
 
     overwriteRolloutRecords(rolloutPath, [
       childMeta({ id: CHILD, parentThreadId: ROOT, agentPath: childPath }),
@@ -777,12 +1186,40 @@ try {
     assert.equal(recovered.visibleAgentCount, 1);
     assert.equal(recovered.rows[0].status, 'running');
     assert.equal(recovered.rows[0].elapsedStartedAt.getTime(), 41_000);
-    assert.equal(logCount(logs, CHILD), 6, 'five errors and one recovery');
+    assert.equal(logCount(logs, CHILD), 8, 'seven errors and one recovery');
     assert.equal(calls.every((threadId) => threadId === CHILD), true);
     assert.equal(files.get(CHILD).path, rolloutPath);
+    const trackingErrorTransitions = logs.filter(
+      (message) => message.includes(CHILD) && message.includes('tracking error')
+    ).length;
+    const trackingRecoveryTransitions = logs.filter(
+      (message) => message.includes(CHILD) && message.includes('recovered')
+    ).length;
+    const assertedIdentityMismatchCases = [
+      'resolved-session-id',
+      'canonical-id',
+      'canonical-parent',
+      'canonical-path',
+      'canonical-source',
+      'duplicate-parent',
+      'duplicate-agent-path',
+    ].length;
+    assert.equal(
+      trackingErrorTransitions,
+      7,
+      `child tracking error transitions: expected=7 actual=${trackingErrorTransitions}`
+    );
+    assert.equal(
+      trackingRecoveryTransitions,
+      1,
+      `child tracking recovery transitions: expected=1 actual=${trackingRecoveryTransitions}`
+    );
 
     console.log(
-      `METRIC canonical-errors id=1 parent=1 path=1 source=1 duplicateMeta=1 recoveries=1 resolverAttempts=${calls.length}`
+      `METRIC canonical-errors trackingErrorTransitions=${trackingErrorTransitions} ` +
+        `trackingRecoveryTransitions=${trackingRecoveryTransitions} ` +
+        `resolverAttempts=${calls.length} ` +
+        `assertedIdentityMismatchCases=${assertedIdentityMismatchCases}`
     );
   });
 
@@ -899,6 +1336,25 @@ try {
     assert.equal(calls.every((id) => id === SOURCE), true);
 
     overwriteRolloutRecords(sourcePath, [
+      canonicalSessionMeta({ id: SOURCE }),
+      taskStarted({
+        turnId: sourceTurn,
+        startedAt: 50,
+        timestamp: timestamp(50_000),
+      }),
+    ]);
+    files.set(SOURCE, { path: sourcePath, sessionId: WRONG_SOURCE });
+    const resolvedSessionMismatch = await collector.collect(52_100);
+    assert.equal(resolvedSessionMismatch.rootTrackingError, true);
+    assert.equal(logCount(logs, SOURCE), 3);
+    assert.equal(
+      logs.at(-1)?.includes('resolved rollout session mismatch'),
+      true,
+      `root-source resolver SessionFile.sessionId mismatch: expected=true actual=${logs.at(-1)?.includes('resolved rollout session mismatch')}`
+    );
+
+    files.set(SOURCE, { path: sourcePath });
+    overwriteRolloutRecords(sourcePath, [
       canonicalSessionMeta({ id: WRONG_SOURCE }),
       taskStarted({
         turnId: sourceTurn,
@@ -908,7 +1364,7 @@ try {
     ]);
     const mismatched = await collector.collect(52_100);
     assert.equal(mismatched.rootTrackingError, true);
-    assert.equal(logCount(logs, SOURCE), 3);
+    assert.equal(logCount(logs, SOURCE), 4);
     assert.equal(calls.every((id) => id === SOURCE), true);
 
     overwriteRolloutRecords(sourcePath, [
@@ -926,7 +1382,7 @@ try {
     assert.equal(recovered.rootTrackingError, false);
     assert.equal(recovered.visibleAgentCount, 1);
     assert.deepEqual(recovered.rows.map((row) => row.threadId), [LOCAL_CHILD]);
-    assert.equal(logCount(logs, SOURCE), 4, 'three errors and one recovery');
+    assert.equal(logCount(logs, SOURCE), 5, 'four errors and one recovery');
     assert.equal(calls.filter((id) => id === COPIED_LEGACY).length, 0);
     assert.equal(calls.filter((id) => id === COPIED_PAGINATED).length, 0);
     assert.equal(calls.filter((id) => id === LOCAL_CHILD).length, 1);
@@ -934,9 +1390,46 @@ try {
     const idle = await collector.collect(52_100);
     assert.equal(idle.visibleAgentCount, 1);
     assert.equal(calls.filter((id) => id === LOCAL_CHILD).length, 1);
+    const rootTrackingErrorTransitions = logs.filter((message) =>
+      message.includes('tracking error')
+    ).length;
+    const rootTrackingRecoveryTransitions = logs.filter((message) =>
+      message.includes('recovered')
+    ).length;
+    const sourceAttempts = calls.filter((id) => id === SOURCE).length;
+    const copiedLegacyRegistrations = calls.filter(
+      (id) => id === COPIED_LEGACY
+    ).length;
+    const copiedPaginatedRegistrations = calls.filter(
+      (id) => id === COPIED_PAGINATED
+    ).length;
+    const duplicateRegistrations =
+      calls.filter((id) => id === LOCAL_CHILD).length - 1;
+    const assertedRootSourceErrorCases = [
+      'missing',
+      'malformed',
+      'resolved-session-id',
+      'canonical-id',
+    ].length;
+    assert.equal(
+      rootTrackingErrorTransitions,
+      4,
+      `root tracking error transitions: expected=4 actual=${rootTrackingErrorTransitions}`
+    );
+    assert.equal(
+      rootTrackingRecoveryTransitions,
+      1,
+      `root tracking recovery transitions: expected=1 actual=${rootTrackingRecoveryTransitions}`
+    );
 
     console.log(
-      `METRIC root-errors missing=1 malformed=1 canonicalMismatch=1 recoveries=1 sourceAttempts=${calls.filter((id) => id === SOURCE).length} copiedLegacyRegistrations=0 copiedPaginatedRegistrations=0 duplicateRegistrations=0`
+      `METRIC root-errors trackingErrorTransitions=${rootTrackingErrorTransitions} ` +
+        `trackingRecoveryTransitions=${rootTrackingRecoveryTransitions} ` +
+        `sourceAttempts=${sourceAttempts} ` +
+        `copiedLegacyRegistrations=${copiedLegacyRegistrations} ` +
+        `copiedPaginatedRegistrations=${copiedPaginatedRegistrations} ` +
+        `duplicateRegistrations=${duplicateRegistrations} ` +
+        `assertedRootSourceErrorCases=${assertedRootSourceErrorCases}`
     );
   });
 } finally {

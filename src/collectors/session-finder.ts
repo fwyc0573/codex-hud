@@ -462,15 +462,22 @@ function buildSessionFile(filePath: string): SessionFile | null {
   }
 }
 
-function findSessionByThreadId(sessionId: string): SessionFile | null {
+export function findRolloutByThreadId(threadId: string): SessionFile | null {
   const codexHome = getCodexHome();
-  const activePath = findRolloutPathBySessionIdInRoot(path.join(codexHome, 'sessions'), sessionId);
+  const activePath = findRolloutPathBySessionIdInRoot(
+    path.join(codexHome, 'sessions'),
+    threadId
+  );
+  if (activePath) {
+    return buildSessionFile(activePath);
+  }
+
   const archivedPath = findRolloutPathBySessionIdInRoot(
     path.join(codexHome, ARCHIVED_SESSIONS_SUBDIR),
-    sessionId
+    threadId
   );
 
-  return buildSessionFile(activePath ?? archivedPath ?? '');
+  return archivedPath ? buildSessionFile(archivedPath) : null;
 }
 
 /**
@@ -550,7 +557,7 @@ export class SessionFinder {
     }
 
     this.currentThreadId = threadId;
-    const next = findSessionByThreadId(threadId);
+    const next = findRolloutByThreadId(threadId);
 
     if (!next) {
       if (this.currentSession) {

@@ -113,7 +113,7 @@ Compact mode shows `Agents: N`, where `N` counts all visible tracked agent nodes
 codex                        # Launch with HUD
 codex --model gpt-5          # Pass any Codex CLI args
 codex "help me debug this"   # With prompt
-codex-resume                 # Resume last session
+codex resume                 # Resume last session
 ```
 
 <details>

@@ -203,14 +203,21 @@ export interface SessionMetaPayload {
 }
 
 export interface ResponseItemPayload {
-  type: 'message' | 'function_call' | 'function_call_output';
+  type:
+    | 'message'
+    | 'function_call'
+    | 'function_call_output'
+    | 'custom_tool_call'
+    | 'custom_tool_call_output';
   role?: 'user' | 'assistant' | 'developer';
   content?: ContentBlock[];
   id?: string;
   call_id?: string;
   name?: string;
   arguments?: string;
-  output?: FunctionOutput;
+  input?: string;
+  status?: string;
+  output?: FunctionOutput | ContentBlock[] | string;
 }
 
 export interface ContentBlock {
@@ -225,7 +232,16 @@ export interface FunctionOutput {
 }
 
 export interface EventMsgPayload {
-  type: 'plan_update' | 'token_count' | 'rate_limit' | 'context_compacted' | 'turn_started' | 'thread_settings_applied' | 'other';
+  type:
+    | 'plan_update'
+    | 'token_count'
+    | 'rate_limit'
+    | 'context_compacted'
+    | 'turn_started'
+    | 'thread_settings_applied'
+    | 'mcp_tool_call_begin'
+    | 'mcp_tool_call_end'
+    | 'other';
   explanation?: string;
   plan?: PlanStep[];
   info?: TokenUsageInfo;
@@ -237,8 +253,28 @@ export interface EventMsgPayload {
   model_context_window?: number;
   // For thread_settings_applied events
   thread_settings?: {
+    model?: string;
+    model_provider_id?: string;
     service_tier?: string;
+    reasoning_effort?: string;
+    collaboration_mode?: {
+      settings?: {
+        model?: string;
+        reasoning_effort?: string;
+      };
+    };
   };
+  call_id?: string;
+  invocation?: {
+    server?: string;
+    tool?: string;
+    arguments?: Record<string, unknown>;
+  };
+  duration?: {
+    secs?: number;
+    nanos?: number;
+  };
+  result?: Record<string, unknown>;
 }
 
 export interface TurnContextPayload {

@@ -151,6 +151,30 @@ assert.equal(
   'a later thread_settings_applied event must update the existing service tier'
 );
 
+const updatedEffortRollout = `${fs.readFileSync(rolloutPath, 'utf8')}${JSON.stringify({
+  timestamp: '2026-04-09T14:18:07.000Z',
+  type: 'event_msg',
+  payload: {
+    type: 'thread_settings_applied',
+    thread_settings: {
+      model: 'gpt-5.5',
+      reasoning_effort: 'medium',
+    },
+  },
+})}\n`;
+fs.writeFileSync(rolloutPath, updatedEffortRollout, 'utf8');
+const updatedEffortResult = await parser.parse();
+assert.equal(
+  updatedEffortResult?.session?.model,
+  'gpt-5.5',
+  'a later thread_settings_applied event must update the active model'
+);
+assert.equal(
+  updatedEffortResult?.session?.reasoningEffort,
+  'medium',
+  'a later thread_settings_applied event must update the active reasoning effort'
+);
+
 const rolloutWithRunningCall = writeRollout([
   {
     timestamp: '2026-04-09T14:17:53.997Z',

@@ -16,6 +16,7 @@ import type {
   PlanProgress,
   SessionInfo,
   TokenUsageInfo,
+  FunctionOutput,
 } from '../types.js';
 
 /**
@@ -81,6 +82,40 @@ function extractToolTarget(toolName: string, argsStr?: string): string | undefin
   } catch {
     return undefined;
   }
+}
+
+function getMcpToolName(payload: EventMsgPayload): string | undefined {
+  const server = payload.invocation?.server;
+  const tool = payload.invocation?.tool;
+  if (!server || !tool) {
+    return undefined;
+  }
+  return `${server}/${tool}`;
+}
+
+function getMcpToolStatus(payload: EventMsgPayload): 'completed' | 'error' {
+  const result = payload.result;
+  if (!result || typeof result !== 'object') {
+    return 'completed';
+  }
+  return 'Err' in result || 'error' in result || result.isError === true
+    ? 'error'
+    : 'completed';
+}
+
+function getMcpDurationMs(payload: EventMsgPayload): number | undefined {
+  const seconds = payload.duration?.secs;
+  const nanos = payload.duration?.nanos;
+  if (seconds === undefined && nanos === undefined) {
+    return undefined;
+  }
+  if (
+    (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0)) ||
+    (nanos !== undefined && (!Number.isFinite(nanos) || nanos < 0))
+  ) {
+    return undefined;
+  }
+  return (seconds ?? 0) * 1000 + (nanos ?? 0) / 1_000_000;
 }
 
 /**
@@ -277,14 +312,56 @@ export async function parseRolloutFile(
             lastToolActivityTime = timestamp;
             const runningCall = runningCalls.get(payload.call_id);
             if (runningCall) {
+              const functionOutput = payload.output as FunctionOutput | undefined;
               runningCall.status =
-                payload.output?.success === false ? 'error' : 'completed';
+                functionOutput?.success === false ? 'error' : 'completed';
               runningCall.duration = timestamp.getTime() - runningCall.timestamp.getTime();
               runningCalls.delete(payload.call_id);
 
               // Update in recentCalls array
               const idx = toolActivity.recentCalls.findIndex(
                 (c) => c.id === payload.call_id
+              );
+              if (idx >= 0) {
+                toolActivity.recentCalls[idx] = runningCall;
+              } else {
+                toolActivity.recentCalls.push(runningCall);
+                if (toolActivity.recentCalls.length > maxRecentCalls) {
+                  toolActivity.recentCalls.shift();
+                }
+              }
+            }
+          } else if (payload.type === 'custom_tool_call' && payload.call_id && payload.name) {
+            // Current Codex CLI records tool invocations as custom_tool_call items.
+            // The output item is the completion boundary; ignore the item's
+            // status because the live rollout can emit status="completed" first.
+            lastToolActivityTime = timestamp;
+            const toolCall: ToolCall = {
+              id: payload.call_id,
+              name: payload.name,
+              timestamp,
+              status: 'running',
+            };
+
+            runningCalls.set(toolCall.id, toolCall);
+            toolActivity.totalCalls++;
+            toolActivity.callsByType[payload.name] =
+              (toolActivity.callsByType[payload.name] ?? 0) + 1;
+            toolActivity.recentCalls.push(toolCall);
+            if (toolActivity.recentCalls.length > maxRecentCalls) {
+              toolActivity.recentCalls.shift();
+            }
+          } else if (payload.type === 'custom_tool_call_output' && payload.call_id) {
+            // A custom tool output completes the matching custom_tool_call.
+            lastToolActivityTime = timestamp;
+            const runningCall = runningCalls.get(payload.call_id);
+            if (runningCall) {
+              runningCall.status = 'completed';
+              runningCall.duration = timestamp.getTime() - runningCall.timestamp.getTime();
+              runningCalls.delete(payload.call_id);
+
+              const idx = toolActivity.recentCalls.findIndex(
+                (call) => call.id === payload.call_id
               );
               if (idx >= 0) {
                 toolActivity.recentCalls[idx] = runningCall;
@@ -326,11 +403,102 @@ export async function parseRolloutFile(
               tokenUsage.model_context_window = payload.model_context_window;
             }
           } else if (payload.type === 'thread_settings_applied') {
+            const threadSettings = payload.thread_settings;
+            const settingsModel =
+              threadSettings?.model ?? threadSettings?.collaboration_mode?.settings?.model;
+            const settingsEffort =
+              threadSettings?.reasoning_effort ??
+              threadSettings?.collaboration_mode?.settings?.reasoning_effort;
+            if (settingsModel) {
+              sessionModel = settingsModel;
+              if (session) {
+                session.model = settingsModel;
+              }
+            }
+            if (settingsEffort) {
+              sessionReasoningEffort = settingsEffort;
+              if (session) {
+                session.reasoningEffort = settingsEffort;
+              }
+            }
             const serviceTier = payload.thread_settings?.service_tier;
             if (serviceTier !== undefined) {
               sessionServiceTier = serviceTier;
               if (session) {
                 session.serviceTier = serviceTier;
+              }
+            }
+          } else if (
+            payload.type === 'mcp_tool_call_begin' ||
+            payload.type === 'mcp_tool_call_end'
+          ) {
+            const mcpName = getMcpToolName(payload);
+            const callId = payload.call_id;
+            if (mcpName && callId) {
+              lastToolActivityTime = timestamp;
+              const existingCall = runningCalls.get(callId);
+              if (payload.type === 'mcp_tool_call_begin') {
+                if (!existingCall) {
+                  const toolCall: ToolCall = {
+                    id: callId,
+                    name: mcpName,
+                    timestamp,
+                    status: 'running',
+                    arguments: payload.invocation?.arguments,
+                  };
+                  runningCalls.set(callId, toolCall);
+                  toolActivity.totalCalls++;
+                  toolActivity.callsByType[mcpName] =
+                    (toolActivity.callsByType[mcpName] ?? 0) + 1;
+                  toolActivity.recentCalls.push(toolCall);
+                  if (toolActivity.recentCalls.length > maxRecentCalls) {
+                    toolActivity.recentCalls.shift();
+                  }
+                }
+              } else {
+                const status = getMcpToolStatus(payload);
+                if (existingCall) {
+                  const previousName = existingCall.name;
+                  existingCall.name = mcpName;
+                  if (previousName !== mcpName) {
+                    const previousCount = toolActivity.callsByType[previousName] ?? 0;
+                    if (previousCount <= 1) {
+                      delete toolActivity.callsByType[previousName];
+                    } else {
+                      toolActivity.callsByType[previousName] = previousCount - 1;
+                    }
+                    toolActivity.callsByType[mcpName] =
+                      (toolActivity.callsByType[mcpName] ?? 0) + 1;
+                  }
+                  existingCall.status = status;
+                  existingCall.duration = getMcpDurationMs(payload);
+                  runningCalls.delete(callId);
+                  const idx = toolActivity.recentCalls.findIndex((call) => call.id === callId);
+                  if (idx >= 0) {
+                    toolActivity.recentCalls[idx] = existingCall;
+                  } else {
+                    toolActivity.recentCalls.push(existingCall);
+                    if (toolActivity.recentCalls.length > maxRecentCalls) {
+                      toolActivity.recentCalls.shift();
+                    }
+                  }
+                } else {
+                  const toolCall: ToolCall = {
+                    id: callId,
+                    name: mcpName,
+                    timestamp,
+                    status,
+                    duration: getMcpDurationMs(payload),
+                    arguments: payload.invocation?.arguments,
+                  };
+                  toolActivity.totalCalls++;
+                  toolActivity.callsByType[mcpName] =
+                    (toolActivity.callsByType[mcpName] ?? 0) + 1;
+                  toolActivity.recentCalls.push(toolCall);
+                  if (toolActivity.recentCalls.length > maxRecentCalls) {
+                    toolActivity.recentCalls.shift();
+                  }
+                }
               }
             }
           }
@@ -394,6 +562,9 @@ export class RolloutParser {
       return null;
     }
 
+    const previousRunningNames = new Map(
+      Array.from(this.runningCalls.entries()).map(([id, call]) => [id, call.name])
+    );
     const { result, newOffset, runningCalls, wasTruncated } = await parseRolloutFile(
       this.rolloutPath,
       this.lastOffset,
@@ -401,6 +572,40 @@ export class RolloutParser {
       this.runningCalls,
       this.cachedResult?.session ?? null
     );
+
+    // An older rollout can start a generic function_call and then enrich the
+    // same call_id with mcp_tool_call_end. The parser updates the call object
+    // in place; migrate the accumulated type counter for that one call too.
+    if (this.cachedResult) {
+      for (const [callId, previousName] of previousRunningNames) {
+        const parsedCall =
+          result.toolActivity.recentCalls.find((call) => call.id === callId) ??
+          runningCalls.get(callId);
+        if (!parsedCall || parsedCall.name === previousName) {
+          continue;
+        }
+
+        const previousCount = this.cachedResult.toolActivity.callsByType[previousName] ?? 0;
+        if (previousCount <= 1) {
+          delete this.cachedResult.toolActivity.callsByType[previousName];
+        } else {
+          this.cachedResult.toolActivity.callsByType[previousName] = previousCount - 1;
+        }
+        this.cachedResult.toolActivity.callsByType[parsedCall.name] =
+          (this.cachedResult.toolActivity.callsByType[parsedCall.name] ?? 0) + 1;
+
+        // The matching end event was already counted in the current parse's
+        // local type map while renaming the call object. It represents the
+        // cached call, so remove that one local increment before the maps are
+        // merged below.
+        const currentCount = result.toolActivity.callsByType[parsedCall.name] ?? 0;
+        if (currentCount <= 1) {
+          delete result.toolActivity.callsByType[parsedCall.name];
+        } else {
+          result.toolActivity.callsByType[parsedCall.name] = currentCount - 1;
+        }
+      }
+    }
 
     this.lastOffset = newOffset;
     this.runningCalls = runningCalls;

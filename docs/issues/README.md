@@ -1,9 +1,3 @@
-## Modification History
-
-| Date       | Summary of Changes |
-|------------|--------------------|
-| 2026-07-28 | Added the v1.0 review-era index entry and kept issue links relative to this directory. |
-
 # Issues 索引
 
 | 编号 | 标题 | 严重性 | 状态 | 文档 |

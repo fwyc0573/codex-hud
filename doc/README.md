@@ -1,9 +1,3 @@
-## Modification History
-
-| Date       | Summary of Changes |
-|------------|--------------------|
-| 2026-07-28 | Updated the support matrix for the v1.0 release preview and documented the validation boundary. |
-
 # System Support
 
 | Platform | Status |

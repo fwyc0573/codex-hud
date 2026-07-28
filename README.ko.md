@@ -1,14 +1,3 @@
-## 변경 이력
-
-| 날짜       | 변경 요약 |
-|------------|-----------|
-| 2026-07-28 | skills/hooks 집계의 5초 캐시 갱신 창을 명확히 기록했습니다. |
-| 2026-07-28 | HUD 기본 높이를 5행으로 고정하고 실행 중 Fast mode 표시를 문서화했습니다. |
-| 2026-07-28 | v1.0 release preview로 깨끗한 pane 시작, 실시간 skills/hooks 집계, 안전한 nested tmux 실행을 기록했습니다. |
-| 2026-07-27 | context-first token 행, 런타임 Approval 표시, permission 새로고침, 프로젝트 이름 기반 session 이름을 문서화했습니다. |
-| 2026-07-26 | checkout별 지연 업데이트와 transactional 사전 build 안전성을 문서화했습니다. |
-| 2026-07-12 | authoritative subagent activity, timeout 의미, 개요 필터링을 문서화했습니다. |
-
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -26,7 +15,7 @@ Windows 지원은 Ubuntu WSL을 통해 `feature/windows-support-dual-entry` bran
 
 > Claude Code의 [claude-hud](https://github.com/jarrodwatts/claude-hud)에서 영감을 받았습니다.
 
-![Codex HUD — 단일 세션](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
+![Codex HUD — 단일 세션](./doc/fig/screenshot.png)
 
 ## 왜 Codex HUD가 필요한가요?
 
@@ -34,11 +23,10 @@ Windows 지원은 Ubuntu WSL을 통해 `feature/windows-support-dual-entry` bran
 
 계기판 없이 비행하는 것과 같습니다. Codex HUD는 터미널 하단에 상시 대시보드를 제공합니다:
 
-- **브랜치, 모델, 권한** — 한눈에 파악, 추측 불필요
-- **Token 사용량 (cache 포함)** — 컨텍스트 소비량을 정확히 파악
-- **Context 윈도우 채움 바** — 한계에 가까워지면 즉시 인지
-- **MCP 서버 상태 & 도구 호출** — Codex가 실제로 무엇을 하는지 모니터링
-- **Reasoning effort 레벨** — 현재 사고 깊이 표시
+- **브랜치, 모델, 권한, 모드** — 한눈에 파악, 추측 불필요
+- **Context 윈도우 채움 바** — 한계에 가까워지면 그래픽으로 즉시 인지
+- **MCP 서버 상태 & 도구 호출, skills & agent 액션** — Codex가 실제로 무엇을 하는지 모니터링
+- **tmux** — 설정 없이 Codex CLI를 tmux에서 네이티브 실행
 
 **Q: 여러 Codex 세션을 동시에 모니터링할 수 있나요?**
 
@@ -236,17 +224,6 @@ npm install && npm run build   # 빌드
 npm run dev                    # 감시 모드
 node dist/index.js             # HUD 직접 실행
 ```
-
-## 변경 이력
-
-| 날짜 | 변경 사항 |
-|------|-----------|
-| 2026-07-26 | nested tmux client 실행 시 바깥 session을 유지하도록 수정 |
-| 2026-07-26 | 시작 시 GitHub Release 업데이트 알림과 `cx` 별칭 추가 |
-| 2026-04-09 | 빠른 설치/동기화/업그레이드/제거 명령어 추가 |
-| 2026-04-09 | HUD 세션을 tmux 패인에 바인딩; reasoning effort 표시 |
-| 2026-02-09 | 리사이즈 후 메인 패인 포커스 수정; 마우스 스크롤 기본값 개선 |
-| 2026-02-09 | 세션 연결 기본값 및 스크롤백 설정 업데이트 |
 
 ## 라이선스
 

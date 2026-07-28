@@ -1,14 +1,3 @@
-## Modification History
-
-| Date       | Summary of Changes |
-|------------|--------------------|
-| 2026-07-28 | Clarified the five-second skills/hooks cache refresh window. |
-| 2026-07-28 | Documented the fixed five-line default HUD height and live Fast mode status. |
-| 2026-07-28 | Added the v1.0 release-preview feature set: clean pane startup, live skills/hooks counts, and safer nested tmux launch behavior. |
-| 2026-07-27 | Documented context-first tokens, runtime Approval labels, permission refresh, and project-readable session names. |
-| 2026-07-26 | Documented checkout-scoped deferred updates and transactional pre-build upgrade safety. |
-| 2026-07-12 | Documented authoritative subagent activity, timeout semantics, and overview filtering. |
-
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -22,7 +11,7 @@ Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex)
 
 > Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.
 
-![Codex HUD — Single Session](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
+![Codex HUD — Single Session](./doc/fig/screenshot.png)
 
 ## Why Codex HUD?
 
@@ -30,11 +19,10 @@ Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex)
 
 Because you're flying blind without one. Codex HUD gives you a persistent dashboard at the bottom of your terminal:
 
-- **Branch, model, permissions** — at a glance, no guessing
-- **Token usage (including cache)** — know exactly how much context you've burned
-- **Context window fill bar** — see when you're about to hit the wall
-- **MCP server status & tool calls** — watch what Codex is actually doing
-- **Reasoning effort level** — see the current thinking depth
+- **Branch, model, permission, mode** — at a glance, no guessing
+- **Context window fill bar** — graphically see when you're about to hit the wall
+- **MCP server status & tool calls, skills & agent actions** — watch what Codex is actually doing
+- **tmux** — natively run Codex CLI in tmux with zero setup
 
 **Q: I run multiple Codex sessions. Can I monitor them all?**
 
@@ -238,17 +226,6 @@ npm install && npm run build   # Build
 npm run dev                    # Watch mode
 node dist/index.js             # Run HUD directly
 ```
-
-## Changelog
-
-| Date | Change |
-|------|--------|
-| 2026-07-26 | Preserve the outer tmux session when launching a nested HUD client |
-| 2026-07-26 | Add launch-time GitHub Release update reminders and the `cx` alias |
-| 2026-04-09 | Add quick install/sync/upgrade/uninstall commands |
-| 2026-04-09 | Bind HUD session to current tmux pane; display reasoning effort |
-| 2026-02-09 | Keep Codex pane focused after resize; refine mouse-scroll defaults |
-| 2026-02-09 | Update session attach defaults and scrollback config |
 
 ## License
 

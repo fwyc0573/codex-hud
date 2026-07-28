@@ -1,14 +1,3 @@
-## 修改历史
-
-| 日期       | 修改摘要 |
-|------------|----------|
-| 2026-07-28 | 补充 skills/hooks 统计使用 5 秒缓存的刷新说明。 |
-| 2026-07-28 | 记录默认 HUD 高度固定为 5 行以及运行中的 Fast mode 状态。 |
-| 2026-07-28 | 记录 v1.0 release preview：干净 pane 启动、实时 skills/hooks 统计和更安全的嵌套 tmux 启动。 |
-| 2026-07-27 | 记录 context-first token 行、运行时 Approval 文案、permission 刷新和易区分的项目 session 名称。 |
-| 2026-07-26 | 记录 checkout 隔离的延后更新与事务化预构建升级安全语义。 |
-| 2026-07-12 | 记录权威 subagent 活动、timeout 语义与概览过滤行为。 |
-
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -26,7 +15,7 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 > 灵感来源于 Claude Code 的 [claude-hud](https://github.com/jarrodwatts/claude-hud)。
 
-![Codex HUD — 单 Session 模式](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
+![Codex HUD — 单 Session 模式](./doc/fig/screenshot.png)
 
 ## 为什么需要 Codex HUD？
 
@@ -34,11 +23,10 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 因为没有它你就是在盲飞。Codex HUD 在终端底部提供一个持久的仪表盘：
 
-- **分支、模型、权限** —— 一目了然，不用猜
-- **Token 用量（含 cache）** —— 精确知道烧了多少上下文
-- **Context 窗口填充条** —— 快撞墙时提前知道
-- **MCP 服务器状态 & 工具调用** —— 看 Codex 实际在干什么
-- **Reasoning effort 级别** —— 当前思考深度一目了然
+- **分支、模型、权限、模式** —— 一目了然，不用猜
+- **Context 窗口填充条** —— 图形化显示何时即将触顶
+- **MCP 服务器状态 & 工具调用、skills & agent 动作** —— 看 Codex 实际在干什么
+- **tmux** —— 原生在 tmux 中运行 Codex CLI，零配置
 
 **Q: 我同时跑多个 Codex session，能一起监控吗？**
 
@@ -233,17 +221,6 @@ npm install && npm run build   # 构建
 npm run dev                    # 监听模式
 node dist/index.js             # 直接运行 HUD
 ```
-
-## 更新日志
-
-| 日期 | 变更 |
-|------|------|
-| 2026-07-26 | 修复在嵌套 tmux 中启动 HUD 时外层 session 被退出的问题 |
-| 2026-07-26 | 新增启动时 GitHub Release 更新提醒和 `cx` 别名 |
-| 2026-04-09 | 新增快速安装/同步/升级/卸载命令 |
-| 2026-04-09 | HUD 按 tmux pane 绑定会话；显示 reasoning effort |
-| 2026-02-09 | 修复 resize 后主 pane 焦点漂移；优化鼠标滚动默认行为 |
-| 2026-02-09 | 更新会话复用默认策略与滚动配置 |
 
 ## 许可证
 

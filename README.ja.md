@@ -1,14 +1,3 @@
-## 変更履歴
-
-| 日付       | 変更概要 |
-|------------|----------|
-| 2026-07-28 | skills/hooks 集計の 5 秒キャッシュ更新ウィンドウを明記。 |
-| 2026-07-28 | HUD のデフォルト高さを 5 行に固定し、実行中の Fast mode 表示を文書化。 |
-| 2026-07-28 | v1.0 release preview として、起動コマンドの汚染防止、skills/hooks のライブ集計、nested tmux の安全な起動を追加。 |
-| 2026-07-27 | context-first の token 行、ランタイム Approval 表示、permission 更新、プロジェクト名付き session 名を文書化。 |
-| 2026-07-26 | checkout 単位の遅延更新と transactional な事前 build の安全性を文書化。 |
-| 2026-07-12 | authoritative な subagent activity、timeout の意味、概要フィルタリングを文書化。 |
-
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/lang-中文-red.svg" alt="中文"></a>
@@ -26,7 +15,7 @@ Windows サポートは Ubuntu WSL 経由で `feature/windows-support-dual-entry
 
 > Claude Code の [claude-hud](https://github.com/jarrodwatts/claude-hud) にインスパイアされています。
 
-![Codex HUD — シングルセッション](./doc/fig/2a00eaf0-496a-4039-a0ce-87a9453df30d.png)
+![Codex HUD — シングルセッション](./doc/fig/screenshot.png)
 
 ## なぜ Codex HUD が必要？
 
@@ -34,11 +23,10 @@ Windows サポートは Ubuntu WSL 経由で `feature/windows-support-dual-entry
 
 計器なしのフライトと同じです。Codex HUD はターミナル下部に常駐ダッシュボードを表示します：
 
-- **ブランチ・モデル・権限** —— 一目で把握、推測不要
-- **Token 使用量（cache 含む）** —— コンテキストの消費量を正確に把握
-- **Context ウィンドウ充填バー** —— 上限に近づいたら即座にわかる
-- **MCP サーバー状況 & ツール呼び出し** —— Codex が実際に何をしているか監視
-- **Reasoning effort レベル** —— 現在の思考深度を表示
+- **ブランチ・モデル・権限・モード** —— 一目で把握、推測不要
+- **Context ウィンドウ充填バー** —— 上限に近づくのをグラフィカルに確認
+- **MCP サーバー状況 & ツール呼び出し、skills & agent アクション** —— Codex が実際に何をしているか監視
+- **tmux** —— 設定不要で Codex CLI を tmux 内でネイティブ実行
 
 **Q: 複数の Codex セッションを同時に監視できますか？**
 
@@ -237,17 +225,6 @@ npm install && npm run build   # ビルド
 npm run dev                    # ウォッチモード
 node dist/index.js             # HUD を直接実行
 ```
-
-## 変更履歴
-
-| 日付 | 変更内容 |
-|------|----------|
-| 2026-07-26 | nested tmux client 起動時に外側 session を維持する修正 |
-| 2026-07-26 | 起動時の GitHub Release 更新リマインダーと `cx` エイリアスを追加 |
-| 2026-04-09 | クイックインストール/同期/アップグレード/アンインストールコマンドを追加 |
-| 2026-04-09 | HUD セッションを tmux ペインにバインド、reasoning effort を表示 |
-| 2026-02-09 | リサイズ後のメインペインフォーカス修正、マウススクロールのデフォルト改善 |
-| 2026-02-09 | セッションアタッチのデフォルトとスクロールバック設定を更新 |
 
 ## ライセンス
 

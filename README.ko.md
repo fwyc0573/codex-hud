@@ -2,6 +2,11 @@
 
 | 날짜       | 변경 요약 |
 |------------|-----------|
+| 2026-07-28 | skills/hooks 집계의 5초 캐시 갱신 창을 명확히 기록했습니다. |
+| 2026-07-28 | HUD 기본 높이를 5행으로 고정하고 실행 중 Fast mode 표시를 문서화했습니다. |
+| 2026-07-28 | v1.0 release preview로 깨끗한 pane 시작, 실시간 skills/hooks 집계, 안전한 nested tmux 실행을 기록했습니다. |
+| 2026-07-27 | context-first token 행, 런타임 Approval 표시, permission 새로고침, 프로젝트 이름 기반 session 이름을 문서화했습니다. |
+| 2026-07-26 | checkout별 지연 업데이트와 transactional 사전 build 안전성을 문서화했습니다. |
 | 2026-07-12 | authoritative subagent activity, timeout 의미, 개요 필터링을 문서화했습니다. |
 
 <p align="center">
@@ -45,6 +50,9 @@ Windows 지원은 Ubuntu WSL을 통해 `feature/windows-support-dual-entry` bran
 
 아닙니다. Codex HUD가 tmux를 자동으로 활성화합니다. `codex`만 입력하면 HUD가 나타납니다. tmux가 설치되지 않은 경우에도 설치 프로그램이 처리합니다.
 
+이미 tmux pane 안에서 `codex`, `cx` 또는 `codex-hud`를 실행하면 같은 tmux socket에
+nested client를 열고 바깥 session을 유지합니다. HUD를 닫으면 원래 pane으로 돌아갑니다.
+
 ## 빠른 시작
 
 ### macOS/Linux (`main`)
@@ -80,16 +88,17 @@ codex
 
 | 명령어 | 설명 |
 |--------|------|
+| `cx` | HUD와 함께 Codex 실행 (`codex`와 같은 wrapper) |
 | `codex-hud-sync` | 현재 체크아웃을 다시 빌드하고 별칭 갱신 |
-| `codex-hud-upgrade` | 최신 변경 사항을 풀한 후 다시 빌드 |
+| `codex-hud-upgrade` | 최신 build를 transactional 방식으로 가져와 검증하고 활성화 |
 | `codex-hud-uninstall` | 별칭을 제거하고 HUD 세션 중지 |
 
 ## HUD에 무엇이 표시되나요?
 
 ```
 [gpt-5.4 xhigh] █████░░░░ 45% │ my-project git:(main ●) │ 12m
-mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
-Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+3 extensions | 3 skills | 2 hooks | 2 AGENTS.md | Approval: ask for approval | Fast: on | Sandbox: ws-write
+Ctx: ████░░░░ 45% (50.2K/128K) | Tokens: 50.2K | (in: 35.0K, cache: 5.0K, out: 15.2K) | ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ Edit: file.ts | ✓ Read ×3
 ◐ codex_cli_explore 2m14s ↳2
@@ -98,10 +107,21 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 | 행 | 내용 |
 |----|------|
 | **헤더** | 모델 + effort, context 바, 프로젝트명, git 브랜치, 세션 타이머 |
-| **환경** | 설정 수, 작업 모드, MCP 서버, 명령 파일, 승인/샌드박스 |
+| **환경** | 설정 수, MCP 서버, 활성화된 skills/hooks, 명령 파일, 승인/샌드박스 및 Fast mode |
 | **Tokens** | 총 token (입력/cache/출력 내역), context 채움률, compact 횟수 |
 | **Session** | 작업 디렉토리, Session ID, CLI 버전 |
 | **활동** | 실행 중인 도구 호출, 최근 도구 이력, 활성 subagent |
+
+Approval은 최신 Codex 런타임 permission에 따라 `ask for approval`, `approve for me`,
+`full access` 중 하나로 표시됩니다. Codex 실행 중 permission을 변경하면 session을
+재시작하지 않아도 HUD가 표시를 갱신합니다. HUD가 생성하는 tmux session은
+`codex-hud-new-topic-research-a1b2c3d4-20260727220308-2505832`처럼 프로젝트 이름을
+포함해 구분하기 쉬운 형식을 사용합니다.
+`Fast: on`은 priority service tier, `Fast: off`는 default tier를 뜻합니다. skills와 hooks는
+현재 cwd에 적용되는 effective configured scope의 유효하고 활성화된 entry 개수를 표시합니다. 집계에는 5초 프로세스 내 캐시가 사용되므로 skills/hooks 파일 변경은 일반적으로 약 5초 안에 표시됩니다.
+wrapper는 tmux pane에서 Codex를 직접 시작하므로 attach 중 시작 명령이 터미널에 출력되지
+않습니다. 기본 HUD 높이는 5행이며, 다른 고정 높이는 `CODEX_HUD_HEIGHT`로 지정할 수
+있습니다.
 
 ### Subagent activity
 
@@ -117,6 +137,7 @@ compact 모드는 `Agents: N`을 표시합니다. `N`은 확장 모드의 직접
 codex                        # HUD와 함께 실행
 codex --model gpt-5          # Codex CLI 인수 전달
 codex "help me debug this"   # 프롬프트 포함
+cx                           # 같은 HUD wrapper를 짧은 명령으로 실행
 codex-resume                 # 이전 세션 재개
 ```
 
@@ -140,8 +161,9 @@ codex-hud --self-check       # 환경 진단 실행
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `CODEX_HUD_POSITION` | `bottom` | HUD 패인 위치 (`top` / `bottom`) |
-| `CODEX_HUD_HEIGHT` | 터미널의 1/6 | HUD 높이 (행 수) |
+| `CODEX_HUD_HEIGHT` | 5행 | HUD 높이 (행 수) |
 | `CODEX_HUD_MOUSE` | `1` | 마우스/트랙패드 스크롤 활성화 |
+| `CODEX_HUD_UPDATE_CHECK` | 활성화 | GitHub 정식 Release를 확인하고 종료 후 업데이트 제안 (`0`/`false`로 비활성화) |
 
 <details>
 <summary>모든 환경 변수</summary>
@@ -154,12 +176,33 @@ codex-hud --self-check       # 환경 진단 실행
 | `CODEX_HUD_AUTO_ATTACH` | `0` | 같은 디렉토리의 최신 세션에 자동 연결 |
 | `CODEX_HUD_ALTERNATE_SCREEN` | `0` | codex 패인의 tmux alternate-screen |
 | `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | 첫 렌더링 시 스크롤백 초기화 |
+| `CODEX_HUD_BIND_TOGGLE` | `0` | 기존 server-wide Prefix+H HUD 전환을 선택적으로 활성화 |
+| `CODEX_HUD_UPDATE_CHECK` | 활성화 | 12시간마다 새 안정 Release를 확인하고 세션 종료 후 업데이트를 확인 |
 | `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | running agent 표시 timeout; 양의 safe integer 밀리초 값만 허용 |
 | `CODEX_HUD_CWD` | (미설정) | 작업 디렉토리 재정의 |
 | `CODEX_HOME` | `~/.codex` | Codex 홈 디렉토리 |
 | `CODEX_SESSIONS_PATH` | (미설정) | sessions 디렉토리 재정의 |
 
 </details>
+
+### Update 알림
+
+새 `codex`, `cx`, `codex-resume` 또는 직접 실행한 `codex-hud` 세션은 12시간에 한 번
+GitHub 정식 Release를 확인합니다. 기존 세션을 다시 연결할 때는 현재 대화를 방해하지
+않습니다. 더 높은 안정 버전이 있으면 대화형 터미널에 다음 문구가 표시됩니다:
+
+```text
+[codex-hud] Update available: v旧 → v新. Update after this session exits? [Y/n]
+```
+
+확인 후 요청을 기록하고, 새 tmux 세션이 checkout 전용 close hook에 등록된 뒤에만
+scheduling이 완료됩니다. 일반 detach는 Codex 세션을 유지하며 업데이트를 시작하지
+않습니다. tmux 세션이 실제로 종료되면 정확한 fast-forward target을 fetch하고 격리된
+staging worktree에서 의존성 설치와 build를 수행합니다. 사전 build가 성공한 경우에만
+active checkout을 전진시키므로 dependency/build 실패 시 HEAD/worktree는 변경되지
+않습니다. 상태와 로그는 checkout 외부의 `$XDG_STATE_HOME/codex-hud/`(미설정 시
+`~/.local/state/codex-hud/`)에 저장됩니다. `CODEX_HUD_UPDATE_CHECK=0` 또는 `false`로
+비활성화할 수 있으며 `codex-hud-upgrade`도 같은 transactional flow를 사용합니다.
 
 ### config.toml
 
@@ -169,6 +212,8 @@ HUD는 `CODEX_HOME/config.toml`에서 설정을 읽습니다:
 model = "gpt-5.2-codex"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
+service_tier = "priority"
+hooks = true
 
 [mcp_servers.my-server]
 command = ["node", "server.js"]
@@ -196,6 +241,8 @@ node dist/index.js             # HUD 직접 실행
 
 | 날짜 | 변경 사항 |
 |------|-----------|
+| 2026-07-26 | nested tmux client 실행 시 바깥 session을 유지하도록 수정 |
+| 2026-07-26 | 시작 시 GitHub Release 업데이트 알림과 `cx` 별칭 추가 |
 | 2026-04-09 | 빠른 설치/동기화/업그레이드/제거 명령어 추가 |
 | 2026-04-09 | HUD 세션을 tmux 패인에 바인딩; reasoning effort 표시 |
 | 2026-02-09 | 리사이즈 후 메인 패인 포커스 수정; 마우스 스크롤 기본값 개선 |

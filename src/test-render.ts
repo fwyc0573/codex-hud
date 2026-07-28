@@ -111,6 +111,8 @@ function createMockData(options: {
       mcpCount: 2,
       configsCount: 2,
       extensionsCount: 2,
+      skillsCount: 0,
+      hooksCount: 0,
       workMode: 'development',
     },
     sessionStart: new Date(Date.now() - 12 * 60 * 1000),  // 12 minutes ago

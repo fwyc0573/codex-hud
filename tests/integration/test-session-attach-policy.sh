@@ -62,7 +62,7 @@ hash_cwd() {
   printf "%s" "$cwd" | shasum -a 256 | awk '{print $1}' | cut -c1-8
 }
 
-session_prefix="codex-hud-$(hash_cwd "$PWD")"
+session_prefix="codex-hud-$(basename "$PWD")-$(hash_cwd "$PWD")"
 existing_session="${session_prefix}-20260209093000-4242"
 
 prepare_tmux_env() {

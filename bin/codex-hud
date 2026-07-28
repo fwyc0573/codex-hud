@@ -5,7 +5,7 @@
 #
 # Environment variables:
 #   CODEX_HUD_POSITION - HUD pane position: bottom (default), top
-#   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 1/6 of terminal height, min 5)
+#   CODEX_HUD_HEIGHT   - HUD pane height in lines (default: 5)
 #   CODEX_HUD_HEIGHT_AUTO - Auto-adjust HUD height based on pane width (default: 0)
 #   CODEX_HUD_HEIGHT_MIN - Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
 #   CODEX_HUD_HEIGHT_MAX - Maximum HUD height when auto-adjusting (default: 12)
@@ -13,7 +13,9 @@
 #   CODEX_HUD_NO_ATTACH - Deprecated: if set to true, do not attach to existing session
 #   CODEX_HUD_ALTERNATE_SCREEN - Use alternate screen in codex pane (default: 0)
 #   CODEX_HUD_MOUSE - Enable tmux mouse mode for this session (default: 1)
+#   CODEX_HUD_BIND_TOGGLE - Install the legacy server-wide Prefix+H toggle (default: 0)
 #   CODEX_HUD_CLEAR_SCROLLBACK - If set to 1, clears tmux scrollback on first render
+#   CODEX_HUD_UPDATE_CHECK - Set to 0 or false to disable release checks and prompts
 #
 
 set -e
@@ -25,6 +27,8 @@ HUD_HEIGHT="${CODEX_HUD_HEIGHT:-}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 ALIAS_MARKER="# codex-hud alias"
 CODEX_CLI_PATH=""
+UPDATE_HELPER_PATH="$SCRIPT_DIR/codex-hud-update.mjs"
+UPDATE_UPGRADE_PATH="$SCRIPT_DIR/codex-hud-upgrade"
 FORCE_ATTACH="0"
 FORCE_NEW_SESSION="0"
 
@@ -59,6 +63,57 @@ step() {
 # Check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+update_checks_disabled() {
+    local value="${CODEX_HUD_UPDATE_CHECK:-}"
+    value=$(printf "%s" "$value" | tr '[:upper:]' '[:lower:]')
+    [[ "$value" == "0" || "$value" == "false" ]]
+}
+
+run_update_helper() {
+    local command_name="$1"
+    shift
+    if [[ ! -f "$UPDATE_HELPER_PATH" ]]; then
+        warn "Update helper is missing: $UPDATE_HELPER_PATH"
+        return 1
+    fi
+    if ! command_exists node; then
+        warn "Node.js is unavailable; skipping codex-hud update helper."
+        return 1
+    fi
+    node "$UPDATE_HELPER_PATH" "$command_name" "$@"
+}
+
+run_update_check() {
+    local checkout_path="$1"
+    if update_checks_disabled; then
+        return 0
+    fi
+    if ! run_update_helper check --checkout "$checkout_path" --upgrade-command "$UPDATE_UPGRADE_PATH"; then
+        warn "The optional codex-hud update check failed; continuing to start Codex."
+    fi
+}
+
+register_update_session() {
+    local checkout_path="$1"
+    if update_checks_disabled; then
+        return 0
+    fi
+    if ! run_update_helper register-session --checkout "$checkout_path" --session "$SESSION_NAME" --upgrade-command "$UPDATE_UPGRADE_PATH"; then
+        warn "The optional deferred update registration failed; continuing to start Codex."
+        abort_update_session "$checkout_path"
+    fi
+}
+
+abort_update_session() {
+    local checkout_path="$1"
+    if update_checks_disabled; then
+        return 0
+    fi
+    if ! run_update_helper abort-session --checkout "$checkout_path" --session "$SESSION_NAME"; then
+        warn "The optional deferred update abort failed; continuing orphan cleanup."
+    fi
 }
 
 parse_boolean_setting() {
@@ -140,9 +195,25 @@ hash_cwd() {
     fi
 }
 
-# Generate session name based on PWD hash (unique per invocation)
+# Generate a shell-safe project component for human-readable session names.
+session_project_slug() {
+    local project_name
+    project_name=$(basename "$1")
+    if [[ "$project_name" == "/" || -z "$project_name" ]]; then
+        project_name="root"
+    fi
+
+    project_name=$(printf "%s" "$project_name" | LC_ALL=C tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
+    if [[ -z "$project_name" ]]; then
+        error "Unable to derive a safe project name from: $1"
+    fi
+    printf "%.32s" "$project_name"
+}
+
+# Generate a project-readable session name while retaining path uniqueness.
+PROJECT_SLUG="$(session_project_slug "$PWD")"
 SESSION_HASH="$(hash_cwd "$PWD")"
-SESSION_PREFIX="codex-hud-${SESSION_HASH}"
+SESSION_PREFIX="codex-hud-${PROJECT_SLUG}-${SESSION_HASH}"
 SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
 
 resolve_codex_cli() {
@@ -454,12 +525,34 @@ check_existing_session() {
 
 # Cleanup function - only cleanup on explicit exit, not on attach to existing
 cleanup() {
-    # Only kill session if we created it (not if we attached to existing)
-    if [[ "${SESSION_CREATED:-}" == "true" ]]; then
+    # Remove only an orphan created before a client attaches successfully.
+    # A normal detach returns from attach-session while Codex is still running;
+    # that session must remain alive until its main pane exits.
+    if [[ "${SESSION_CREATED:-}" == "true" && "${SESSION_PRESERVE_ON_EXIT:-}" != "true" ]]; then
+        abort_update_session "${CURRENT_CHECKOUT_PATH:-$(pwd)}"
         if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
             tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
         fi
     fi
+}
+
+# Attach a client to the HUD session without asking tmux to attach through an
+# existing client. When the wrapper is launched from a tmux pane, tmux rejects
+# a plain nested `attach-session` and the cleanup trap would remove the new
+# session before the user can see it. Reuse the owning socket explicitly and
+# clear TMUX only for the child client so the outer session remains intact.
+attach_session() {
+    local session_name="$1"
+    if [[ -z "${TMUX:-}" ]]; then
+        tmux attach-session -t "$session_name"
+        return
+    fi
+
+    local tmux_socket="${TMUX%%,*}"
+    if [[ -z "$tmux_socket" || "$tmux_socket" == "$TMUX" ]]; then
+        error "Unable to determine the owning tmux socket for nested attach."
+    fi
+    TMUX= tmux -S "$tmux_socket" attach-session -t "$session_name"
 }
 
 # Resolve HUD height based on terminal size
@@ -488,7 +581,7 @@ resolve_hud_height() {
         return 0
     fi
     
-    local desired=$((term_height / 6))
+    local desired=5
     if [[ "$desired" -lt "$min_height" ]]; then
         desired="$min_height"
     fi
@@ -504,6 +597,7 @@ resolve_hud_height() {
 # Create new tmux session with HUD
 create_session() {
     local cwd="$1"
+    CURRENT_CHECKOUT_PATH="$cwd"
     shift
     local codex_args=("$@")
     local cwd_escaped
@@ -517,13 +611,19 @@ create_session() {
     resolve_hud_height "$term_height"
     
     # Build the codex command string
-    local codex_cmd="$CODEX_CLI_PATH"
+    # Quote the resolved executable path before embedding it in the pane shell
+    # command. PATH entries may contain spaces or shell metacharacters.
+    local codex_cmd
+    codex_cmd=$(printf "%q" "$CODEX_CLI_PATH")
     for arg in "${codex_args[@]}"; do
         codex_cmd="$codex_cmd $(printf "%q" "$arg")"
     done
     
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
+    SESSION_CREATED="true"
+    # Register this update-enabled session before any command is sent to it.
+    register_update_session "$cwd"
     # Keep wheel scrolling available in Codex pane by default.
     local mouse_setting
     mouse_setting=$(parse_boolean_setting "CODEX_HUD_MOUSE" "${CODEX_HUD_MOUSE:-}" "1") || exit 1
@@ -561,14 +661,19 @@ create_session() {
     tmux set-option -t "$SESSION_NAME" -q @codex_hud_client_attached 0
     tmux set-hook -t "$SESSION_NAME" client-attached "set-option -t '$SESSION_NAME' -q @codex_hud_client_attached 1"
 
-    # Send the gated codex command to the main pane; auto-cleanup when it exits.
+    # Start the gated codex command as the pane's process; auto-cleanup when it
+    # exits. Using respawn-pane avoids injecting the launch into an interactive
+    # shell with send-keys, which would echo the full command into the user's
+    # terminal before Codex starts.
     # The wait is capped (~10s = 200 * 0.05s) and fails open: if no client ever
     # attaches, codex still starts rather than leaving the pane hung forever. In
     # that fail-open path the probe leak this gate guards against can recur, but a
     # bounded wait is preferred over an unbounded hang when no client appears.
     local attach_gate_cmd
     attach_gate_cmd="i=0; while [ \"\$(tmux show-option -t '$SESSION_NAME' -qv @codex_hud_client_attached)\" != \"1\" ] && [ \"\$i\" -lt 200 ]; do sleep 0.05; i=\$((i+1)); done"
-    tmux send-keys -t "$SESSION_NAME" "$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'" C-m
+    local codex_launch_cmd
+    codex_launch_cmd="$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; tmux kill-session -t '$SESSION_NAME'"
+    tmux respawn-pane -k -t "$main_pane_id" "$codex_launch_cmd"
     
     # Wait a moment for the session to be ready
     sleep 0.2
@@ -594,10 +699,14 @@ create_session() {
         set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT" "$main_pane_id"
     fi
 
-    # Bind toggle key (Prefix + H) to switch HUD modes for this session
-    tmux bind-key -T prefix H run-shell "tmux if-shell -F '#{@codex_hud_pane}' 'tmux send-keys -t #{@codex_hud_pane} C-t' ''"
+    # tmux key tables are server-wide; keep the legacy binding opt-in so a HUD
+    # session cannot overwrite Prefix+H for unrelated user sessions.
+    local bind_toggle
+    bind_toggle=$(parse_boolean_setting "CODEX_HUD_BIND_TOGGLE" "${CODEX_HUD_BIND_TOGGLE:-}" "0") || exit 1
+    if [[ "$bind_toggle" == "1" ]]; then
+        tmux bind-key -T prefix H run-shell "tmux if-shell -F '#{@codex_hud_pane}' 'tmux send-keys -t #{@codex_hud_pane} C-t' ''"
+    fi
     
-    SESSION_CREATED="true"
 }
 
 # Main function
@@ -648,9 +757,13 @@ main() {
         if [[ -n "$hud_pane_id" ]]; then
             set_fixed_hud_height "$SESSION_NAME" "$hud_pane_id" "$HUD_HEIGHT" "$main_pane_id"
         fi
-        tmux attach-session -t "$SESSION_NAME"
+        attach_session "$SESSION_NAME"
         return 0
     fi
+
+    # A new session is the only launch path that may interrupt the user with
+    # an update prompt; reused sessions deliberately skip the check.
+    run_update_check "$cwd"
     
     # Set up cleanup trap
     trap cleanup EXIT
@@ -665,7 +778,8 @@ main() {
     if [[ -n "$main_pane_id" ]]; then
         tmux select-pane -t "$main_pane_id" 2>/dev/null || true
     fi
-    tmux attach-session -t "$SESSION_NAME"
+    attach_session "$SESSION_NAME"
+    SESSION_PRESERVE_ON_EXIT="true"
 }
 
 # Show help
@@ -690,7 +804,7 @@ Options:
 
 Environment Variables:
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
-  CODEX_HUD_HEIGHT    HUD pane height in lines (default: 1/6 of terminal height, min 5)
+  CODEX_HUD_HEIGHT    HUD pane height in lines (default: 5)
   CODEX_HUD_HEIGHT_AUTO Auto-adjust HUD height based on pane width (default: 0)
   CODEX_HUD_HEIGHT_MIN Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
   CODEX_HUD_HEIGHT_MAX Maximum HUD height when auto-adjusting (default: 12)
@@ -698,7 +812,9 @@ Environment Variables:
   CODEX_HUD_NO_ATTACH Deprecated: force new session (overrides auto attach)
   CODEX_HUD_ALTERNATE_SCREEN Use alternate screen in codex pane (default: 0)
   CODEX_HUD_MOUSE Enable tmux mouse mode for this session (default: 1)
+  CODEX_HUD_BIND_TOGGLE Install the legacy server-wide Prefix+H toggle (default: 0)
   CODEX_HUD_CLEAR_SCROLLBACK Clear terminal scrollback on first render (default: 0)
+  CODEX_HUD_UPDATE_CHECK Check GitHub releases and offer deferred updates (default: enabled; 0/false disables)
 
 Requirements:
   - tmux (auto-installed if missing)

@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ProjectInfo, CodexConfig } from '../types.js';
 import { getMcpServerCount } from './codex-config.js';
+import { collectCodexAssetCounts } from './codex-assets.js';
 
 const AGENTS_MD_FILENAMES = [
   'AGENTS.md',
@@ -181,6 +182,7 @@ export function collectProjectInfo(cwd?: string, config?: CodexConfig): ProjectI
   
   // Count extensions (MCP servers count as extensions)
   const mcpCount = config ? getMcpServerCount(config) : 0;
+  const assetCounts = collectCodexAssetCounts(workDir, process.env, config);
   
   return {
     cwd: workDir,
@@ -192,6 +194,8 @@ export function collectProjectInfo(cwd?: string, config?: CodexConfig): ProjectI
     mcpCount,
     configsCount,
     extensionsCount: mcpCount,  // MCP servers are treated as extensions
+    skillsCount: assetCounts.skillsCount,
+    hooksCount: assetCounts.hooksCount,
     workMode,
   };
 }

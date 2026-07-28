@@ -18,6 +18,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_FILE="$HOME/.codex-hud-backup-aliases"
 MARKER="# codex-hud alias"
+UPDATE_HELPER_PATH="$SCRIPT_DIR/bin/codex-hud-update.mjs"
 
 # Print functions
 error() { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
@@ -179,6 +180,15 @@ cleanup_fish() {
     fi
 }
 
+remove_update_hooks() {
+    if [[ ! -f "$UPDATE_HELPER_PATH" ]] || ! command -v node >/dev/null 2>&1; then
+        return 0
+    fi
+    if ! node "$UPDATE_HELPER_PATH" remove-hooks --checkout "$SCRIPT_DIR" >/dev/null 2>&1; then
+        warn "Unable to remove codex-hud update hooks; unrelated tmux hooks were left untouched."
+    fi
+}
+
 # Main uninstall
 main() {
     header "Codex HUD Uninstaller"
@@ -187,6 +197,10 @@ main() {
     local shell_name
     shell_name=$(detect_shell)
     step "Detected shell: $shell_name"
+
+    # Remove only the indexed hook entries owned by codex-hud before sessions
+    # are stopped; user-managed tmux hooks remain intact.
+    remove_update_hooks
     
     # Get RC file
     local rc_file

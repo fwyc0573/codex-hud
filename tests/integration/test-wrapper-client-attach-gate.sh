@@ -114,10 +114,14 @@ if grep -q 'set-hook[[:space:]].*-a[[:space:]]' <<<"$hook_line"; then
   fail "client-attached hook uses 'set-hook -a' (append); a plain set-hook is required"
 fi
 
-# The launch must be gated: the wait loop must reference the gate option.
-launch_line="$(grep -m1 '^send-keys .*@codex_hud_client_attached' "$log_file" || true)"
+# The launch must be gated: the wait loop must reference the gate option and
+# must be started directly as the pane process rather than typed into a shell.
+if grep -q '^send-keys .*@codex_hud_client_attached' "$log_file"; then
+  fail "codex launch is still injected with send-keys"
+fi
+launch_line="$(grep -m1 '^respawn-pane .*@codex_hud_client_attached' "$log_file" || true)"
 if [[ -z "$launch_line" ]]; then
-  fail "codex launch was sent without waiting on the attach gate"
+  fail "codex launch was respawned without waiting on the attach gate"
 fi
 
 # The wait must be bounded (fail-open cap) so the pane cannot hang forever.
@@ -128,7 +132,7 @@ fi
 # Ordering: gate init and hook registration must precede the gated launch.
 init_ln="$(grep -n '@codex_hud_client_attached 0' "$log_file" | head -n1 | cut -d: -f1)"
 hook_ln="$(grep -n '^set-hook .*client-attached' "$log_file" | head -n1 | cut -d: -f1)"
-launch_ln="$(grep -n '^send-keys .*@codex_hud_client_attached' "$log_file" | head -n1 | cut -d: -f1)"
+launch_ln="$(grep -n '^respawn-pane .*@codex_hud_client_attached' "$log_file" | head -n1 | cut -d: -f1)"
 if (( init_ln >= launch_ln )); then
   fail "gate was initialized at/after the launch was sent (init=$init_ln launch=$launch_ln)"
 fi

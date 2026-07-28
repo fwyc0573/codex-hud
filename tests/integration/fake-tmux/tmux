@@ -137,7 +137,14 @@ case "$cmd" in
       shift
     done
     ;;
-  new-session|send-keys|select-pane|attach-session|set-hook|bind-key|kill-session)
+  attach-session)
+    append_log "$cmd $*"
+    if [[ "${TMUX_ATTACH_FAIL:-0}" == "1" ]]; then
+      echo 'simulated attach failure' >&2
+      exit 19
+    fi
+    ;;
+  new-session|send-keys|respawn-pane|select-pane|set-hook|bind-key|kill-session)
     append_log "$cmd $*"
     ;;
   has-session)

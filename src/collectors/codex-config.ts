@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from '@iarna/toml';
-import type { CodexConfig, McpServerConfig } from '../types.js';
+import type { CodexConfig, FastModeState, McpServerConfig, PermissionState } from '../types.js';
 import { getCodexHome } from '../utils/codex-path.js';
 
 /**
@@ -34,6 +34,8 @@ export function readCodexConfig(): CodexConfig {
       model: parsed.model as string | undefined,
       model_reasoning_effort: parsed.model_reasoning_effort as string | undefined,
       model_provider: parsed.model_provider as string | undefined,
+      service_tier: parsed.service_tier as string | undefined,
+      hooks: parsed.hooks as boolean | undefined,
       approval_policy: parsed.approval_policy as string | undefined,
       sandbox_mode: parsed.sandbox_mode as string | undefined,
       mcp_servers: parseMcpServers(parsed.mcp_servers),
@@ -99,17 +101,35 @@ export function getMcpServerCount(config: CodexConfig): number {
 /**
  * Get approval policy display name
  */
-export function getApprovalPolicyDisplay(config: CodexConfig): string {
-  switch (config.approval_policy) {
-    case 'never':
-      return 'auto';
-    case 'on-failure':
-      return 'on-fail';
-    case 'on-request':
-      return 'on-req';
-    case 'untrusted':
-      return 'untrust';
-    default:
-      return config.approval_policy || 'default';
+export function getApprovalPolicyDisplay(
+  config: CodexConfig,
+  runtime?: PermissionState
+): string {
+  const approvalPolicy = runtime?.approvalPolicy ?? config.approval_policy;
+  const sandboxMode = runtime?.sandboxMode ?? config.sandbox_mode;
+
+  if (!approvalPolicy || approvalPolicy === 'untrusted' || approvalPolicy === 'on-request') {
+    return 'ask for approval';
   }
+
+  if (approvalPolicy === 'never' && sandboxMode === 'danger-full-access') {
+    return 'full access';
+  }
+
+  if (approvalPolicy === 'on-failure' || approvalPolicy === 'never') {
+    return 'approve for me';
+  }
+
+  return 'unknown';
+}
+
+/**
+ * Get the fast-mode display from the latest runtime service tier or config fallback.
+ */
+export function getFastModeDisplay(
+  config: CodexConfig,
+  runtime?: FastModeState
+): string {
+  const serviceTier = runtime?.serviceTier ?? config.service_tier;
+  return serviceTier === 'priority' || serviceTier === 'fast' ? 'Fast: on' : 'Fast: off';
 }

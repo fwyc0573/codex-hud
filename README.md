@@ -2,6 +2,11 @@
 
 | Date       | Summary of Changes |
 |------------|--------------------|
+| 2026-07-28 | Clarified the five-second skills/hooks cache refresh window. |
+| 2026-07-28 | Documented the fixed five-line default HUD height and live Fast mode status. |
+| 2026-07-28 | Added the v1.0 release-preview feature set: clean pane startup, live skills/hooks counts, and safer nested tmux launch behavior. |
+| 2026-07-27 | Documented context-first tokens, runtime Approval labels, permission refresh, and project-readable session names. |
+| 2026-07-26 | Documented checkout-scoped deferred updates and transactional pre-build upgrade safety. |
 | 2026-07-12 | Documented authoritative subagent activity, timeout semantics, and overview filtering. |
 
 <p align="center">
@@ -41,6 +46,10 @@ Yes. Toggle to **multi-session overview** (`Ctrl+T`) and see every active sessio
 
 No. Codex HUD auto-activates tmux for you. Just type `codex` and the HUD appears. If tmux isn't installed, the installer handles that too.
 
+If you launch `codex`, `cx`, or `codex-hud` from an existing tmux pane, the
+wrapper opens a nested client on the same tmux socket and keeps the outer
+session alive. Closing the HUD returns you to the original pane.
+
 ## Quick Start
 
 ### macOS/Linux (`main`)
@@ -76,16 +85,17 @@ After the first install, these are available in your shell:
 
 | Command | Description |
 |---------|-------------|
+| `cx` | Start Codex with the HUD (same wrapper as `codex`) |
 | `codex-hud-sync` | Rebuild and refresh aliases for the current checkout |
-| `codex-hud-upgrade` | Pull latest changes, then rebuild |
+| `codex-hud-upgrade` | Transactionally fetch, verify, and activate the latest build |
 | `codex-hud-uninstall` | Remove aliases and stop HUD sessions |
 
 ## What's on the HUD?
 
 ```
 [gpt-5.4 xhigh] █████░░░░ 45% │ my-project git:(main ●) │ 12m
-mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
-Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+3 extensions | 3 skills | 2 hooks | 2 AGENTS.md | Approval: ask for approval | Fast: on | Sandbox: ws-write
+Ctx: ████░░░░ 45% (50.2K/128K) | Tokens: 50.2K | (in: 35.0K, cache: 5.0K, out: 15.2K) | ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ Edit: file.ts | ✓ Read ×3
 ◐ codex_cli_explore 2m14s ↳2
@@ -94,10 +104,23 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 | Line | Shows |
 |------|-------|
 | **Header** | Model + effort, context bar, project, git branch, session timer |
-| **Environment** | Config count, work mode, MCP servers, instruction files, approval/sandbox |
+| **Environment** | Config count, MCP servers, enabled skills/hooks, instruction files, approval/sandbox, Fast mode |
 | **Tokens** | Total tokens with input/cache/output breakdown, context fill, compact count |
 | **Session** | Working directory, session ID, CLI version |
 | **Activity** | Running tool calls, recent tool history, and active subagents |
+
+Approval is shown as `ask for approval`, `approve for me`, or `full access` from the
+latest Codex runtime permission state. If permission changes while Codex is running,
+the HUD refreshes the displayed state without restarting the session. HUD-created tmux
+sessions use a project-readable name such as
+`codex-hud-new-topic-research-a1b2c3d4-20260727220308-2505832`.
+`Fast: on` reflects the active priority service tier; `Fast: off` reflects the default
+tier. The skills and hooks values count enabled, valid entries from the effective configured
+scopes for the current cwd. The counts use a five-second in-process cache, so local
+skills/hooks file changes normally appear within about five seconds.
+The wrapper starts Codex directly in its tmux pane, so the launch command is not echoed
+into the terminal while the HUD is attaching. A default HUD occupies five rows; set
+`CODEX_HUD_HEIGHT` when a different fixed height is required.
 
 ### Subagent activity
 
@@ -113,6 +136,7 @@ Compact mode shows `Agents: N`, where `N` counts all visible tracked agent nodes
 codex                        # Launch with HUD
 codex --model gpt-5          # Pass any Codex CLI args
 codex "help me debug this"   # With prompt
+cx                           # Start the same HUD wrapper with a short command
 codex-resume                 # Resume last session
 ```
 
@@ -128,6 +152,29 @@ codex-hud --self-check       # Run diagnostics
 ```
 </details>
 
+### Update reminders
+
+Each new `codex`, `cx`, `codex-resume`, or direct `codex-hud` session checks the
+latest formal GitHub Release at most once every 12 hours. If a newer stable
+version is found, an interactive terminal shows:
+
+```text
+[codex-hud] Update available: v旧 → v新. Update after this session exits? [Y/n]
+```
+
+Confirming records the request; final scheduling occurs after the new tmux
+session is registered with its checkout-scoped close hook. A normal detach
+keeps Codex running and does not trigger the update. On the true final session
+closure, the updater fetches an exact fast-forward target and installs
+dependencies and builds it in an isolated staging worktree. The active checkout
+fast-forwards only after that build succeeds, so dependency or build failure
+leaves its HEAD and worktree unchanged. Reusing an existing session does not
+prompt. State and logs are kept outside the checkout under
+`$XDG_STATE_HOME/codex-hud/` (or `~/.local/state/codex-hud/`); set
+`CODEX_HUD_UPDATE_CHECK=0` or `false` to disable checks.
+`codex-hud-upgrade` uses the same transactional flow for an immediate manual
+upgrade.
+
 ## Configuration
 
 ### Environment Variables
@@ -135,8 +182,9 @@ codex-hud --self-check       # Run diagnostics
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CODEX_HUD_POSITION` | `bottom` | HUD pane position (`top` / `bottom`) |
-| `CODEX_HUD_HEIGHT` | 1/6 terminal | HUD height in lines |
+| `CODEX_HUD_HEIGHT` | 5 lines | HUD height in lines |
 | `CODEX_HUD_MOUSE` | `1` | Enable mouse/trackpad scrolling |
+| `CODEX_HUD_UPDATE_CHECK` | enabled | Check formal GitHub releases and offer a deferred update (`0`/`false` disables) |
 
 <details>
 <summary>All environment variables</summary>
@@ -149,6 +197,8 @@ codex-hud --self-check       # Run diagnostics
 | `CODEX_HUD_AUTO_ATTACH` | `0` | Auto-attach to latest session in same dir |
 | `CODEX_HUD_ALTERNATE_SCREEN` | `0` | tmux alternate-screen for codex pane |
 | `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | Clear scrollback on first render |
+| `CODEX_HUD_BIND_TOGGLE` | `0` | Opt in to the legacy server-wide Prefix+H HUD toggle |
+| `CODEX_HUD_UPDATE_CHECK` | enabled | Check once per 12 hours for a newer stable GitHub Release; ask before scheduling an update after session exit |
 | `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | Running-agent presentation timeout; positive safe integer milliseconds only |
 | `CODEX_HUD_CWD` | (unset) | Override working directory |
 | `CODEX_HOME` | `~/.codex` | Codex home directory |
@@ -164,6 +214,8 @@ The HUD reads from `CODEX_HOME/config.toml`:
 model = "gpt-5.2-codex"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
+service_tier = "priority"
+hooks = true
 
 [mcp_servers.my-server]
 command = ["node", "server.js"]
@@ -191,6 +243,8 @@ node dist/index.js             # Run HUD directly
 
 | Date | Change |
 |------|--------|
+| 2026-07-26 | Preserve the outer tmux session when launching a nested HUD client |
+| 2026-07-26 | Add launch-time GitHub Release update reminders and the `cx` alias |
 | 2026-04-09 | Add quick install/sync/upgrade/uninstall commands |
 | 2026-04-09 | Bind HUD session to current tmux pane; display reasoning effort |
 | 2026-02-09 | Keep Codex pane focused after resize; refine mouse-scroll defaults |

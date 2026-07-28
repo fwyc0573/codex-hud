@@ -16,6 +16,13 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 WRAPPER="$PROJECT_DIR/bin/codex-hud"
+TMUX_SOCKET="codexhud-legacy-e2e-$$"
+TMUX_SENTINEL="legacy-e2e-sentinel-$$"
+
+cleanup() {
+    TMUX= tmux -L "$TMUX_SOCKET" -f /dev/null kill-server >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 pass() { echo -e "${GREEN}✓${NC} $1"; }
 fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
@@ -47,10 +54,13 @@ echo "  Codex HUD End-to-End Test Suite"
 echo "========================================"
 echo ""
 
-# Clean up any existing sessions
-info "Cleaning up existing tmux sessions..."
-tmux kill-server 2>/dev/null || true
-sleep 0.5
+# Bind every wrapper call to a dedicated tmux server, even when this test is
+# launched from an existing tmux pane.
+info "Creating isolated tmux fixture..."
+TMUX= tmux -L "$TMUX_SOCKET" -f /dev/null new-session -d -s "$TMUX_SENTINEL" "sleep 60"
+socket_path=$(TMUX= tmux -L "$TMUX_SOCKET" -f /dev/null display-message -p -t "$TMUX_SENTINEL" '#{socket_path}')
+session_id=$(TMUX= tmux -L "$TMUX_SOCKET" -f /dev/null display-message -p -t "$TMUX_SENTINEL" '#{session_id}')
+export TMUX="$socket_path,$$,${session_id#\$}"
 
 # Test 1: Wrapper script exists and is executable
 info "Test 1: Wrapper script"

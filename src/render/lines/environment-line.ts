@@ -1,30 +1,16 @@
 /**
  * Environment Line Renderer
  * Renders Codex-specific module status:
- * Format: 2 configs | mode: development | 3 extensions | N AGENTS.md | Approval: policy
+ * Format: 2 configs | 3 extensions | N skills | M hooks | Approval: policy | Fast: on
  */
 
 import type { HudData } from '../../types.js';
 import { theme, colors, icons } from '../colors.js';
-import { getMcpServerCount, getApprovalPolicyDisplay } from '../../collectors/codex-config.js';
-
-/**
- * Render work mode with appropriate color
- */
-function renderWorkMode(mode: 'development' | 'production' | 'unknown'): string {
-  switch (mode) {
-    case 'production':
-      return theme.error('prod');
-    case 'development':
-      return theme.success('dev');
-    default:
-      return colors.dim('unknown');
-  }
-}
+import { getMcpServerCount, getApprovalPolicyDisplay, getFastModeDisplay } from '../../collectors/codex-config.js';
 
 /**
  * Render the environment line
- * Format: 2 configs | mode: dev | 3 extensions | N AGENTS.md | Approval: policy
+ * Format: 2 configs | 3 extensions | N skills | M hooks | Approval: policy | Fast: on
  */
 export function renderEnvironmentLine(data: HudData): string | null {
   const parts: string[] = [];
@@ -34,12 +20,17 @@ export function renderEnvironmentLine(data: HudData): string | null {
     parts.push(theme.info(`${data.project.configsCount}`) + colors.dim(' configs'));
   }
   
-  // Codex-specific: Work mode
-  parts.push(colors.dim('mode: ') + renderWorkMode(data.project.workMode));
-  
   // Codex-specific: Extensions count (MCP servers)
   if (data.project.extensionsCount > 0) {
     parts.push(theme.info(`${data.project.extensionsCount}`) + colors.dim(' extensions'));
+  }
+
+  if (data.project.skillsCount > 0) {
+    parts.push(theme.info(`${data.project.skillsCount}`) + colors.dim(' skills'));
+  }
+
+  if (data.project.hooksCount > 0) {
+    parts.push(theme.info(`${data.project.hooksCount}`) + colors.dim(' hooks'));
   }
   
   // AGENTS.md count
@@ -65,12 +56,21 @@ export function renderEnvironmentLine(data: HudData): string | null {
   }
   
   // Approval policy
-  const approvalPolicy = getApprovalPolicyDisplay(data.config);
+  const approvalPolicy = getApprovalPolicyDisplay(data.config, {
+    approvalPolicy: data.session?.approvalPolicy,
+    sandboxMode: data.session?.sandboxMode,
+  });
   parts.push(colors.dim('Approval: ') + theme.value(approvalPolicy));
+
+  // Fast mode reflects the latest runtime service tier when available.
+  parts.push(theme.value(getFastModeDisplay(data.config, {
+    serviceTier: data.session?.serviceTier,
+  })));
   
-  // Sandbox mode (if set and not default)
-  if (data.config.sandbox_mode) {
-    const sandbox = data.config.sandbox_mode;
+  // Sandbox mode (if set and not default). Runtime turn_context state takes
+  // precedence so the permission and sandbox labels cannot drift apart.
+  const sandbox = data.session?.sandboxMode ?? data.config.sandbox_mode;
+  if (sandbox) {
     let sandboxDisplay: string;
     if (sandbox === 'danger-full-access') {
       sandboxDisplay = theme.error('DANGER');

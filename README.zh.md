@@ -2,6 +2,11 @@
 
 | 日期       | 修改摘要 |
 |------------|----------|
+| 2026-07-28 | 补充 skills/hooks 统计使用 5 秒缓存的刷新说明。 |
+| 2026-07-28 | 记录默认 HUD 高度固定为 5 行以及运行中的 Fast mode 状态。 |
+| 2026-07-28 | 记录 v1.0 release preview：干净 pane 启动、实时 skills/hooks 统计和更安全的嵌套 tmux 启动。 |
+| 2026-07-27 | 记录 context-first token 行、运行时 Approval 文案、permission 刷新和易区分的项目 session 名称。 |
+| 2026-07-26 | 记录 checkout 隔离的延后更新与事务化预构建升级安全语义。 |
 | 2026-07-12 | 记录权威 subagent 活动、timeout 语义与概览过滤行为。 |
 
 <p align="center">
@@ -45,6 +50,9 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 不需要。Codex HUD 自动激活 tmux。只需输入 `codex`，HUD 就会出现。如果没装 tmux，安装程序也会搞定。
 
+如果你已经在 tmux pane 中运行 `codex`、`cx` 或 `codex-hud`，wrapper 会在同一个
+tmux socket 上打开嵌套 client，并保留外层 session。关闭 HUD 后会返回原来的 pane。
+
 ## 快速开始
 
 ### macOS/Linux（`main`）
@@ -80,16 +88,17 @@ codex
 
 | 命令 | 说明 |
 |------|------|
+| `cx` | 使用 HUD 启动 Codex（与 `codex` 使用同一个 wrapper） |
 | `codex-hud-sync` | 重新构建并刷新当前 checkout 的别名 |
-| `codex-hud-upgrade` | 拉取最新代码后重新构建 |
+| `codex-hud-upgrade` | 事务化拉取、验证并启用最新 build |
 | `codex-hud-uninstall` | 移除别名并停止 HUD 会话 |
 
 ## HUD 显示了什么？
 
 ```
 [gpt-5.4 xhigh] █████░░░░ 45% │ my-project git:(main ●) │ 12m
-mode: dev | 3 extensions | 2 AGENTS.md | Approval: on-req | Sandbox: ws-write
-Tokens: 50.2K (in: 35.0K, cache: 5.0K, out: 15.2K) | Ctx: ████░░░░ 45% (50.2K/128K) ↻2
+3 extensions | 3 skills | 2 hooks | 2 AGENTS.md | Approval: ask for approval | Fast: on | Sandbox: ws-write
+Ctx: ████░░░░ 45% (50.2K/128K) | Tokens: 50.2K | (in: 35.0K, cache: 5.0K, out: 15.2K) | ↻2
 Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ Edit: file.ts | ✓ Read ×3
 ◐ codex_cli_explore 2m14s ↳2
@@ -98,10 +107,19 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 | 行 | 内容 |
 |----|------|
 | **标题** | 模型 + effort、context 进度条、项目名、git 分支、会话计时 |
-| **环境** | 配置数、工作模式、MCP 服务器、指令文件、审批/沙箱策略 |
+| **环境** | 配置数、MCP 服务器、启用的 skills/hooks、指令文件、审批/沙箱策略和 Fast mode |
 | **Tokens** | 总 token（输入/cache/输出拆分）、context 填充率、compact 次数 |
 | **Session** | 工作目录、Session ID、CLI 版本 |
 | **活动** | 正在执行的工具调用、最近工具调用历史和活跃 subagent |
+
+Approval 会根据 Codex 最新运行时 permission 显示为 `ask for approval`、
+`approve for me` 或 `full access`。Codex 运行过程中修改 permission 后，HUD 会在
+不重启 session 的情况下刷新显示。HUD 创建的 tmux session 使用易区分的项目名格式，
+例如 `codex-hud-new-topic-research-a1b2c3d4-20260727220308-2505832`。
+`Fast: on` 表示当前 service tier 为 priority，`Fast: off` 表示 default。skills 和 hooks
+统计当前 cwd 的 effective configured scopes 中有效且启用的 entries。统计使用 5 秒进程内缓存，skills/hooks 文件变化通常会在约 5 秒内显示。wrapper 会直接在 tmux pane 中启动 Codex，
+因此 attach 时不会把启动命令回显到终端。默认 HUD 高度为 5 行；需要其他固定高度时
+可设置 `CODEX_HUD_HEIGHT`。
 
 ### Subagent 活动
 
@@ -117,6 +135,7 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 codex                        # 启动并自动显示 HUD
 codex --model gpt-5          # 传递 Codex CLI 参数
 codex "help me debug this"   # 带初始提示
+cx                           # 使用更短的命令启动同一个 HUD wrapper
 codex-resume                 # 恢复上次会话
 ```
 
@@ -140,8 +159,9 @@ codex-hud --self-check       # 运行环境诊断
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `CODEX_HUD_POSITION` | `bottom` | HUD 面板位置（`top` / `bottom`） |
-| `CODEX_HUD_HEIGHT` | 终端 1/6 | HUD 高度（行数） |
+| `CODEX_HUD_HEIGHT` | 5 行 | HUD 高度（行数） |
 | `CODEX_HUD_MOUSE` | `1` | 启用鼠标/触控板滚动 |
+| `CODEX_HUD_UPDATE_CHECK` | 启用 | 检查 GitHub 正式 Release 并提供延后更新（设为 `0`/`false` 可禁用） |
 
 <details>
 <summary>全部环境变量</summary>
@@ -154,12 +174,32 @@ codex-hud --self-check       # 运行环境诊断
 | `CODEX_HUD_AUTO_ATTACH` | `0` | 自动复用同目录最新会话 |
 | `CODEX_HUD_ALTERNATE_SCREEN` | `0` | codex pane 的 tmux alternate-screen |
 | `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | 首次渲染时清理 scrollback |
+| `CODEX_HUD_BIND_TOGGLE` | `0` | 可选启用旧版 server-wide Prefix+H HUD 切换快捷键 |
+| `CODEX_HUD_UPDATE_CHECK` | 启用 | 每 12 小时最多检查一次新的稳定 GitHub Release，并在 session 退出后询问是否更新 |
 | `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | running agent 的界面 timeout；只接受正 safe integer 毫秒值 |
 | `CODEX_HUD_CWD` | （未设置） | 覆盖工作目录 |
 | `CODEX_HOME` | `~/.codex` | Codex home 目录 |
 | `CODEX_SESSIONS_PATH` | （未设置） | 覆盖 sessions 目录 |
 
 </details>
+
+### Update 提醒
+
+每个新建的 `codex`、`cx`、`codex-resume` 或直接 `codex-hud` session 都会检查
+GitHub 正式 Release；复用已有 session 时不会打断当前会话。发现更高稳定版本
+时，交互式终端会显示：
+
+```text
+[codex-hud] Update available: v旧 → v新. Update after this session exits? [Y/n]
+```
+
+确认后先记录请求，等新 tmux session 成功登记 checkout 专属 close hook 后才完成调度。
+普通 detach 会保留 Codex session，不触发更新。tmux session 真正关闭后，updater 会
+fetch 精确的 fast-forward target，并在隔离 staging worktree 中安装依赖和 build；只有
+预构建成功才推进 active checkout，因此 dependency 或 build 失败时 HEAD/worktree 保持
+不变。状态和日志保存在 checkout 之外的 `$XDG_STATE_HOME/codex-hud/`（未设置时为
+`~/.local/state/codex-hud/`）。设置 `CODEX_HUD_UPDATE_CHECK=0` 或 `false` 可完全关闭
+检查；`codex-hud-upgrade` 手动升级也使用同一事务流程。
 
 ### config.toml
 
@@ -169,6 +209,8 @@ HUD 从 `CODEX_HOME/config.toml` 读取配置：
 model = "gpt-5.2-codex"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
+service_tier = "priority"
+hooks = true
 
 [mcp_servers.my-server]
 command = ["node", "server.js"]
@@ -196,6 +238,8 @@ node dist/index.js             # 直接运行 HUD
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | 修复在嵌套 tmux 中启动 HUD 时外层 session 被退出的问题 |
+| 2026-07-26 | 新增启动时 GitHub Release 更新提醒和 `cx` 别名 |
 | 2026-04-09 | 新增快速安装/同步/升级/卸载命令 |
 | 2026-04-09 | HUD 按 tmux pane 绑定会话；显示 reasoning effort |
 | 2026-02-09 | 修复 resize 后主 pane 焦点漂移；优化鼠标滚动默认行为 |

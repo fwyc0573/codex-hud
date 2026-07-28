@@ -17,6 +17,18 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 MARKER="# codex-hud alias"
+TEST_ROOT="$(mktemp -d /tmp/codex-hud-install-test-XXXXXX)"
+TEST_HOME="$TEST_ROOT/home"
+TEST_ZDOTDIR="$TEST_ROOT/zdotdir"
+mkdir -p "$TEST_HOME" "$TEST_ZDOTDIR"
+touch "$TEST_HOME/.bashrc" "$TEST_HOME/.bash_profile" "$TEST_ZDOTDIR/.zshrc"
+
+# Keep installer checks isolated from the caller's shell configuration. This
+# test exercises alias writes and cleanup, so using the real HOME would mutate
+# the host zsh/bash files and could affect active Codex sessions.
+export HOME="$TEST_HOME"
+export ZDOTDIR="$TEST_ZDOTDIR"
+export SHELL="/bin/bash"
 
 # Test counters
 TESTS_RUN=0
@@ -52,7 +64,10 @@ cleanup() {
     
     # Remove backup file
     rm -f "$HOME/.codex-hud-backup-aliases"
+
+    rm -rf "$TEST_ROOT"
 }
+trap cleanup EXIT
 
 # Test 1: Verify script files exist and are executable
 test_files_exist() {

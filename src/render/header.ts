@@ -4,8 +4,8 @@
  * 
  * Layout:
  * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
- * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
- * Row 3: Tokens: 12.5K | Ctx: ████░░░░ 45% (50K/128K)
+ * Row 2: 2 AGENTS.md | 3 extensions | 3 skills | 2 hooks | Approval: ask for approval | Fast: on
+ * Row 3: Ctx: ████░░░░ 45% (50K/128K) | Tokens: 12.5K
  * Row 4: Dir: ~/project | Session: abc12345
  * Row 5 (optional): ◐ Edit: file.ts | ✓ Read ×3
  */
@@ -141,8 +141,8 @@ function renderCompactLayout(data: HudData, layout: LayoutConfig, width: number)
 /**
  * Render the expanded layout (multiple lines)
  * Row 1: [Model] █████░░░░░ 45% | project-name git:(branch *) | ⏱️ 10m
- * Row 2: 2 AGENTS.md | 3 MCPs | Approval: default
- * Row 3: Tokens: 12.5K | Ctx: ████░░░░ 45% (50K/128K)
+ * Row 2: 2 AGENTS.md | 3 extensions | 3 skills | 2 hooks | Approval: ask for approval | Fast: on
+ * Row 3: Ctx: ████░░░░ 45% (50K/128K) | Tokens: 12.5K
  * Row 4: Dir: ~/project | Session: abc12345
  * Row 5+: Activity lines (tools, todos)
  */

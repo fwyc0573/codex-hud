@@ -494,20 +494,6 @@ function Get-RealCodexCommand {
         [string[]]$ExcludedPaths = @()
     )
 
-    if ($env:CODEX_HUD_REAL_CODEX) {
-        $configured = Resolve-NormalizedPath -Path $env:CODEX_HUD_REAL_CODEX
-        if (Test-Path -LiteralPath $configured) {
-            return [pscustomobject]@{ Source = $configured }
-        }
-    }
-
-    if ($env:CODEX_HUD_TEST_REAL_CODEX) {
-        $testPath = Resolve-NormalizedPath -Path $env:CODEX_HUD_TEST_REAL_CODEX
-        if (Test-Path -LiteralPath $testPath) {
-            return [pscustomobject]@{ Source = $testPath }
-        }
-    }
-
     $excludeSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in $ExcludedPaths) {
         if (-not [string]::IsNullOrWhiteSpace($item)) {
@@ -516,6 +502,42 @@ function Get-RealCodexCommand {
     }
 
     $normalizedRoot = if ($RepoRoot) { Resolve-NormalizedPath -Path $RepoRoot } else { $null }
+    $rootSeparators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $normalizedRootPrefix = if ($normalizedRoot) {
+        $normalizedRoot.TrimEnd($rootSeparators) + [System.IO.Path]::DirectorySeparatorChar
+    } else {
+        $null
+    }
+
+    if ($env:CODEX_HUD_REAL_CODEX) {
+        $configured = Resolve-NormalizedPath -Path $env:CODEX_HUD_REAL_CODEX
+        $configuredInRepo = $normalizedRoot -and (
+            $configured.Equals($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $configured.StartsWith($normalizedRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        )
+        if (
+            (Test-Path -LiteralPath $configured) -and
+            (-not $excludeSet.Contains($configured)) -and
+            (-not $configuredInRepo)
+        ) {
+            return [pscustomobject]@{ Source = $configured }
+        }
+    }
+
+    if ($env:CODEX_HUD_TEST_REAL_CODEX) {
+        $testPath = Resolve-NormalizedPath -Path $env:CODEX_HUD_TEST_REAL_CODEX
+        $testPathInRepo = $normalizedRoot -and (
+            $testPath.Equals($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $testPath.StartsWith($normalizedRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        )
+        if (
+            (Test-Path -LiteralPath $testPath) -and
+            (-not $excludeSet.Contains($testPath)) -and
+            (-not $testPathInRepo)
+        ) {
+            return [pscustomobject]@{ Source = $testPath }
+        }
+    }
 
     $commands = @(Get-Command codex -All -ErrorAction SilentlyContinue)
     foreach ($command in $commands) {
@@ -532,7 +554,10 @@ function Get-RealCodexCommand {
             continue
         }
 
-        if ($normalizedRoot -and $source.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($normalizedRoot -and (
+            $source.Equals($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $source.StartsWith($normalizedRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        )) {
             continue
         }
 

@@ -159,6 +159,35 @@ exit 1
     $env:CODEX_HUD_REAL_CODEX = $null
     $env:LOCALAPPDATA = $localAppData
 
+    # Test 0: environment-provided Codex paths must honor managed shim exclusions.
+    $excludedBin = Join-Path $tempRoot 'excluded-bin'
+    New-Item -ItemType Directory -Force -Path $excludedBin | Out-Null
+    $excludedCodexCmd = Join-Path $excludedBin 'codex.cmd'
+@"
+@echo off
+exit /b 0
+"@ | Set-Content -Path $excludedCodexCmd -Encoding ascii
+    $env:CODEX_HUD_REAL_CODEX = $excludedCodexCmd
+    . (Join-Path $repoRoot 'bin\windows\common.ps1')
+    $resolvedAfterExclusion = Get-RealCodexCommand -RepoRoot $repoRoot -ExcludedPaths @($excludedCodexCmd)
+    Assert-True -Condition ([bool]$resolvedAfterExclusion) -Message 'Codex resolution should continue after excluding an environment-provided shim'
+    Assert-True -Condition ($resolvedAfterExclusion.Source.Equals($fakeCodexCmd, [System.StringComparison]::OrdinalIgnoreCase)) -Message 'Codex resolution should fall through to the real PATH candidate'
+    $env:CODEX_HUD_REAL_CODEX = $null
+
+    $siblingRepoRoot = Join-Path $tempRoot 'codex-hud'
+    $siblingBin = Join-Path $tempRoot 'codex-hud-tools'
+    New-Item -ItemType Directory -Force -Path $siblingRepoRoot, $siblingBin | Out-Null
+    $siblingCodexCmd = Join-Path $siblingBin 'codex.cmd'
+@"
+@echo off
+exit /b 0
+"@ | Set-Content -Path $siblingCodexCmd -Encoding ascii
+    $env:CODEX_HUD_REAL_CODEX = $siblingCodexCmd
+    $resolvedSiblingCodex = Get-RealCodexCommand -RepoRoot $siblingRepoRoot
+    Assert-True -Condition ([bool]$resolvedSiblingCodex) -Message 'Codex resolution should accept a sibling directory with the same name prefix as the repo'
+    Assert-True -Condition ($resolvedSiblingCodex.Source.Equals($siblingCodexCmd, [System.StringComparison]::OrdinalIgnoreCase)) -Message 'Codex resolution should preserve the explicitly configured sibling candidate'
+    $env:CODEX_HUD_REAL_CODEX = $null
+
     # Test 1: WSL-unavailable wrapper falls back to codex and forwards args.
     $env:CODEX_HUD_SKIP_NATIVE_HUD = '1'
     $env:CODEX_HUD_WSL_COMMAND = 'Z:\missing\wsl.exe'
@@ -441,16 +470,27 @@ exit /b 0
     Assert-Contains -Text $provisionCommand -Needle 'codex-hud-wsl-provision-' -Message 'WSL provisioning script path should use a dedicated temp filename'
     Assert-Contains -Text $provisionCommand -Needle 'SCRIPT:' -Message 'WSL provisioning fake should observe the generated script content'
     Assert-Contains -Text $provisionCommand -Needle 'sudo -n true' -Message 'WSL provisioning should verify passwordless sudo when not root'
+    Assert-Contains -Text $provisionCommand -Needle 'SUDO_CMD="/usr/bin/sudo"' -Message 'WSL provisioning should pin native sudo by absolute path'
     Assert-Contains -Text $provisionCommand -Needle 'https://deb.nodesource.com/setup_lts.x' -Message 'WSL provisioning should install Node.js LTS when needed'
-    Assert-Contains -Text $provisionCommand -Needle 'node --version' -Message 'WSL provisioning should validate Node version'
-    Assert-Contains -Text $provisionCommand -Needle 'npm install -g @openai/codex@latest' -Message 'WSL provisioning should reinstall codex-cli in WSL'
+    Assert-Contains -Text $provisionCommand -Needle 'resolve_native_wsl_command()' -Message 'WSL provisioning should resolve native node, npm, and Codex commands through one provenance gate'
+    Assert-Contains -Text $provisionCommand -Needle 'type -a -P "$command_name"' -Message 'WSL provisioning should inspect all PATH candidates'
+    Assert-Contains -Text $provisionCommand -Needle 'wslpath -w "$resolved_path"' -Message 'WSL provisioning should distinguish WSL-owned paths from Windows paths'
+    Assert-Contains -Text $provisionCommand -Needle 'node_path="$(resolve_native_wsl_command node)"' -Message 'WSL provisioning should validate Node through a native absolute path'
+    Assert-Contains -Text $provisionCommand -Needle 'npm_path="$(resolve_native_wsl_command npm)"' -Message 'WSL provisioning should validate npm through a native absolute path'
+    Assert-Contains -Text $provisionCommand -Needle 'run_root /usr/bin/env "PATH=$native_node_dir:$PATH" "$npm_path" install -g --prefix "$install_prefix" @openai/codex@latest' -Message 'WSL provisioning should execute a validated npm wrapper with native Node PATH and WSL-owned prefix'
+    Assert-Contains -Text $provisionCommand -Needle '/usr/bin/sudo /usr/bin/env PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/npm install -g --prefix /usr/local @openai/codex@latest' -Message 'manual WSL guidance should pin native npm PATH and WSL-owned prefix explicitly'
+    Assert-True -Condition (-not $provisionCommand.Contains('run_root npm install')) -Message 'WSL provisioning should never invoke npm by an unqualified command name'
+    Assert-True -Condition (-not $provisionCommand.Contains('command -v npm')) -Message 'WSL provisioning should not accept Windows npm through interop PATH'
+    Assert-Contains -Text $provisionCommand -Needle 'if codex_path="$(resolve_native_wsl_command codex)"; then' -Message 'WSL provisioning should preserve an existing native WSL Codex CLI'
+    Assert-Contains -Text $provisionCommand -Needle 'npm install -g @openai/codex@latest' -Message 'WSL provisioning should install codex-cli only when missing'
+    Assert-True -Condition (-not $provisionCommand.Contains('npm uninstall -g @openai/codex')) -Message 'WSL provisioning should never uninstall an existing Codex CLI'
     Assert-Contains -Text $provisionCommand -Needle 'ALIAS_MARKER="# codex-hud alias"' -Message 'WSL provisioning should configure codex-hud aliases in the WSL shell rc file'
     Assert-Contains -Text $provisionCommand -Needle 'append_alias codex "$repo_root/bin/codex-hud"' -Message 'WSL provisioning should add a managed codex alias'
     Assert-Contains -Text $provisionCommand -Needle 'codex-hud-sync' -Message 'WSL provisioning should add management command aliases'
 
     # Test 5: install/sync/upgrade/uninstall should manage profile marker block and wrappers.
     $env:CODEX_HUD_PROFILE_PATH = $profilePath
-    $env:CODEX_HUD_SKIP_CLI_REINSTALL = '1'
+    Remove-Item Env:CODEX_HUD_SKIP_CLI_REINSTALL -ErrorAction SilentlyContinue
     Remove-Item Env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL -ErrorAction SilentlyContinue
     $env:CODEX_HUD_SKIP_WSL_SETUP = '1'
     $env:CODEX_HUD_SKIP_BUILD = '1'
@@ -459,6 +499,8 @@ exit /b 0
 
     & (Join-Path $repoRoot 'bin\codex-hud-install.ps1') -Mode install
     Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'codex-hud-install.ps1 should exit 0 in test mode'
+    $existingCodexValidation = (Get-Content -Path $codexArgsLog -Raw).Trim()
+    Assert-Contains -Text $existingCodexValidation -Needle '--version' -Message 'install should validate and preserve the existing Windows Codex CLI'
 
     $profileContent = Get-Content -Path $profilePath -Raw
     $profileMarkerStart = '# ' + '>>>' + ' codex-hud windows ' + '>>>'

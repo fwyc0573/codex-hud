@@ -59,24 +59,44 @@ function Ensure-RepoBuild {
     Invoke-RepoNpm -NodeExecutable $NodeExecutable -NpmArgs @('run', 'build')
 }
 
-function Reinstall-WindowsCodex {
+function Ensure-WindowsCodex {
     param([Parameter(Mandatory = $true)][string]$NodeExecutable)
 
     if ($env:CODEX_HUD_SKIP_CLI_REINSTALL -eq '1') {
-        Write-Warn 'Skipping Windows codex-cli reinstall due to CODEX_HUD_SKIP_CLI_REINSTALL=1.'
+        Write-Warn 'Skipping Windows codex-cli setup due to CODEX_HUD_SKIP_CLI_REINSTALL=1.'
         return
     }
     if ($env:CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL -eq '1') {
-        Write-Warn 'Skipping Windows codex-cli reinstall due to CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL=1.'
+        Write-Warn 'Skipping Windows codex-cli setup due to CODEX_HUD_SKIP_WINDOWS_CLI_REINSTALL=1.'
         return
     }
 
-    Write-Info 'Reinstalling codex-cli on Windows (npm global)...'
-    [void](Invoke-NpmCli -NodeExecutable $NodeExecutable -NpmArguments @('uninstall', '-g', '@openai/codex'))
+    $managedShim = Join-Path (Get-CmdShimDirectory) 'codex.cmd'
+    $existingCodex = Get-RealCodexCommand -RepoRoot $repoRoot -ExcludedPaths @($managedShim)
+    if ($existingCodex) {
+        & $existingCodex.Source --version | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Existing Codex CLI failed validation and was left unchanged.'
+        }
 
+        Write-Info "Using existing Codex CLI on Windows: $($existingCodex.Source)"
+        return
+    }
+
+    Write-Info 'Codex CLI not found on Windows. Installing with npm (global)...'
     $installExit = Invoke-NpmCli -NodeExecutable $NodeExecutable -NpmArguments @('install', '-g', '@openai/codex@latest')
     if ($installExit -ne 0) {
         throw 'Failed to install @openai/codex globally on Windows.'
+    }
+
+    $installedCodex = Get-RealCodexCommand -RepoRoot $repoRoot -ExcludedPaths @($managedShim)
+    if (-not $installedCodex) {
+        throw 'Codex CLI installation completed but no executable could be resolved.'
+    }
+
+    & $installedCodex.Source --version | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Installed Codex CLI failed validation.'
     }
 }
 
@@ -158,38 +178,38 @@ function Ensure-UbuntuDistro {
     $global:WslReady = $false
 }
 
-function Reinstall-WslCodex {
+function Ensure-WslCodex {
     if ($env:CODEX_HUD_SKIP_CLI_REINSTALL -eq '1') {
-        Write-Warn 'Skipping WSL codex-cli reinstall due to CODEX_HUD_SKIP_CLI_REINSTALL=1.'
+        Write-Warn 'Skipping WSL codex-cli setup due to CODEX_HUD_SKIP_CLI_REINSTALL=1.'
         return
     }
     if ($env:CODEX_HUD_SKIP_WSL_CLI_REINSTALL -eq '1') {
-        Write-Warn 'Skipping WSL codex-cli reinstall due to CODEX_HUD_SKIP_WSL_CLI_REINSTALL=1.'
+        Write-Warn 'Skipping WSL codex-cli setup due to CODEX_HUD_SKIP_WSL_CLI_REINSTALL=1.'
         return
     }
 
     if (-not $global:WslReady) {
-        Write-Warn 'WSL distro not ready; skipping WSL codex-cli reinstall for now.'
+        Write-Warn 'WSL distro not ready; skipping WSL codex-cli setup for now.'
         return
     }
 
     $wsl = Get-WslCommand
     if (-not $wsl) {
-        Write-Warn 'wsl.exe missing unexpectedly; skipping WSL codex reinstall.'
+        Write-Warn 'wsl.exe missing unexpectedly; skipping WSL codex-cli setup.'
         return
     }
 
-    Write-Info 'Installing nodejs/npm/tmux in WSL and reinstalling codex-cli...'
+    Write-Info 'Installing nodejs/npm/tmux in WSL and ensuring codex-cli is available...'
     $script = @'
 set -euo pipefail
 
 repo_root="${1:?Repository root WSL path is required}"
-manual_cmd='sudo apt-get update && sudo apt-get install -y ca-certificates curl tmux && curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs && sudo npm install -g @openai/codex@latest'
+manual_cmd='/usr/bin/sudo /usr/bin/apt-get update && /usr/bin/sudo /usr/bin/apt-get install -y ca-certificates curl tmux && /usr/bin/curl -fsSL https://deb.nodesource.com/setup_lts.x | /usr/bin/sudo -E /bin/bash - && /usr/bin/sudo /usr/bin/apt-get install -y nodejs && /usr/bin/sudo /usr/bin/env PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/npm install -g --prefix /usr/local @openai/codex@latest'
 
-if [ "$(id -u)" -eq 0 ]; then
+if [ "$(/usr/bin/id -u)" -eq 0 ]; then
     SUDO_CMD=""
-elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    SUDO_CMD="sudo"
+elif [ -x /usr/bin/sudo ] && /usr/bin/sudo -n true 2>/dev/null; then
+    SUDO_CMD="/usr/bin/sudo"
 else
     echo "codex-hud WSL provisioning requires root or passwordless sudo." >&2
     echo "Run inside WSL: $manual_cmd" >&2
@@ -198,7 +218,7 @@ fi
 
 run_root() {
     if [ -n "$SUDO_CMD" ]; then
-        sudo "$@"
+        "$SUDO_CMD" "$@"
     else
         "$@"
     fi
@@ -206,23 +226,77 @@ run_root() {
 
 run_root_env() {
     if [ -n "$SUDO_CMD" ]; then
-        sudo -E "$@"
+        "$SUDO_CMD" -E "$@"
     else
         "$@"
     fi
 }
 
-get_node_major() {
-    node --version 2>/dev/null | sed -E "s/^v([0-9]+).*/\1/" || true
+resolve_native_wsl_path() {
+    local input_path="${1:?WSL path is required}"
+    local resolved_path
+    local windows_path
+
+    if ! resolved_path="$(/usr/bin/readlink -f -- "$input_path" 2>/dev/null)"; then
+        return 1
+    fi
+    if [ -z "$resolved_path" ]; then
+        return 1
+    fi
+
+    if ! windows_path="$(/usr/bin/wslpath -w "$resolved_path" 2>/dev/null)"; then
+        return 1
+    fi
+
+    if [[ "${windows_path,,}" =~ ^\\\\wsl(\.localhost|\$)\\ ]]; then
+        printf '%s\n' "$resolved_path"
+        return 0
+    fi
+
+    return 1
 }
 
-run_root apt-get update
-run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tmux
+resolve_native_wsl_command() {
+    local command_name="${1:?Native WSL command name is required}"
+    local command_path
+    local resolved_path
+
+    while IFS= read -r command_path; do
+        if [ -z "$command_path" ]; then
+            continue
+        fi
+
+        if resolved_path="$(resolve_native_wsl_path "$command_path")"; then
+            printf '%s\n' "$resolved_path"
+            return 0
+        fi
+    done < <(type -a -P "$command_name" 2>/dev/null || true)
+
+    return 1
+}
+
+get_node_major() {
+    local node_path
+    local node_version
+    if ! node_path="$(resolve_native_wsl_command node)"; then
+        return 0
+    fi
+
+    if ! node_version="$("$node_path" --version 2>/dev/null)"; then
+        return 0
+    fi
+    if [[ "$node_version" =~ ^v([0-9]+) ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
+}
+
+run_root /usr/bin/apt-get update
+run_root /usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y ca-certificates curl tmux
 
 node_major="$(get_node_major)"
 if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | run_root_env bash -
-    run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+    /usr/bin/curl -fsSL https://deb.nodesource.com/setup_lts.x | run_root_env /bin/bash -
+    run_root /usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y nodejs
 fi
 
 node_major="$(get_node_major)"
@@ -231,14 +305,35 @@ if [ -z "$node_major" ] || [ "$node_major" -lt 18 ]; then
     exit 71
 fi
 
-command -v npm >/dev/null 2>&1 || {
+if ! node_path="$(resolve_native_wsl_command node)"; then
+    echo "Native Node.js executable could not be resolved in WSL." >&2
+    exit 71
+fi
+
+if ! npm_path="$(resolve_native_wsl_command npm)"; then
     echo "npm is required in WSL after provisioning." >&2
     exit 72
-}
+fi
 
-run_root npm uninstall -g @openai/codex || true
-run_root npm install -g @openai/codex@latest
-codex --version
+if ! install_prefix="$(resolve_native_wsl_path /usr/local)"; then
+    echo "The WSL global npm prefix is not owned by the WSL filesystem: /usr/local" >&2
+    exit 75
+fi
+
+native_node_dir="${node_path%/*}"
+if codex_path="$(resolve_native_wsl_command codex)"; then
+    if ! PATH="$native_node_dir:$PATH" "$codex_path" --version; then
+        echo "Existing Codex CLI failed validation and was left unchanged." >&2
+        exit 73
+    fi
+else
+    run_root /usr/bin/env "PATH=$native_node_dir:$PATH" "$npm_path" install -g --prefix "$install_prefix" @openai/codex@latest
+    if ! codex_path="$(resolve_native_wsl_command codex)"; then
+        echo "Codex CLI installation completed but no native WSL executable could be resolved." >&2
+        exit 74
+    fi
+    PATH="$native_node_dir:$PATH" "$codex_path" --version
+fi
 
 ALIAS_MARKER="# codex-hud alias"
 SOURCE_MARKER="# codex-hud: load bashrc"
@@ -512,17 +607,18 @@ $npmPrefix = Ensure-PathPriority -NodeExecutable $nodeExe
 $windowsTmux = Ensure-WindowsTmux
 
 if ($Mode -eq 'install') {
-    Reinstall-WindowsCodex -NodeExecutable $nodeExe
+    Ensure-WindowsCodex -NodeExecutable $nodeExe
 }
 
 Ensure-UbuntuDistro
 if ($Mode -eq 'install') {
-    Reinstall-WslCodex
+    Ensure-WslCodex
 }
 
 Ensure-RepoBuild -NodeExecutable $nodeExe
 
-$realCodex = Get-RealCodexCommand -RepoRoot $repoRoot
+$managedCodexShim = Join-Path (Get-CmdShimDirectory) 'codex.cmd'
+$realCodex = Get-RealCodexCommand -RepoRoot $repoRoot -ExcludedPaths @($managedCodexShim)
 if (-not $realCodex) {
     throw 'Unable to resolve codex executable after setup.'
 }

@@ -61,6 +61,8 @@ codex
 
 This branch uses WSL as the supported Windows HUD runtime. PowerShell and cmd are launcher shells; the HUD itself runs in Ubuntu WSL with Bash and tmux.
 
+> **Warning:** Windows installation has not been validated on a native Windows host; back up your existing Codex installation before running it.
+
 1. Download and switch to this branch:
 
 ```powershell
@@ -97,9 +99,9 @@ Notes:
 `codex-hud-install.ps1` automatically:
 
 - install Node.js LTS on Windows if needed
-- reinstall `@openai/codex` globally on Windows
+- preserve an existing Windows Codex CLI and install `@openai/codex` only when missing
 - ensure Ubuntu WSL is available when possible
-- provision WSL with `tmux`, Node.js LTS, `npm`, and `@openai/codex`
+- provision WSL with `tmux`, Node.js LTS, `npm`, and `@openai/codex` only when missing
 - fail fast with exact manual WSL commands if root or passwordless `sudo` is unavailable
 
 For Linux/macOS/Git Bash installs, `install.sh` now fails fast with exact checks and install guidance when required tools are missing. The main required checks are `command -v node`, `node --version`, `command -v npm`, `npm --version`, `command -v tmux`, and `tmux -V`.

@@ -40,6 +40,13 @@ session alive. Closing the HUD returns you to the original pane.
 
 ## Quick Start
 
+### One prompt to install (by agents)
+```bash
+Install codex-hud (https://github.com/fwyc0573/codex-hud) for the Codex CLI by following the instructions in its README.md.
+
+```
+
+
 ### macOS/Linux (`main`)
 
 ```bash
@@ -55,6 +62,8 @@ codex
 ### Windows (WSL) (`feature/windows-support-dual-entry`)
 
 ```powershell
+# warning: windows version support is in early testing and may be unstable.
+
 git clone https://github.com/fwyc0573/codex-hud.git
 cd codex-hud
 git switch feature/windows-support-dual-entry

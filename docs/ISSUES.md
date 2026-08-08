@@ -1,3 +1,9 @@
+## Modification History
+
+| Date       | Summary of Changes |
+|------------|--------------------|
+| 2026-07-28 | Added the v1.0 review-era issue index history entry. |
+
 # Issues 汇总
 
 | 编号 | 标题 | 严重性 | 状态 | 文档 |

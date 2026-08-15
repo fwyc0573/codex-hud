@@ -17,16 +17,22 @@ Windows サポートは Ubuntu WSL 経由で `feature/windows-support-dual-entry
 
 ![Codex HUD — シングルセッション](./doc/fig/screenshot.png)
 
+## お知らせ
+
+- **[2026-08-15]** OpenAI 上流の「capacity exceeded」の自動検出と自動「continue」処理を追加しました。使い方は `cx-continue/README.md` を参照してください。
+- **[2026-07-20]** 最初の正式版 v1.0 をリリースし、macOS と Linux を完全サポートしました。
+
 ## なぜ Codex HUD が必要？
 
 **Q: Codex CLI だけで十分では？**
 
 計器なしのフライトと同じです。Codex HUD はターミナル下部に常駐ダッシュボードを表示します：
 
+- **tmux** —— 設定不要で最適化された tmux 内で Codex CLI をネイティブ実行（上下にスクロールして会話履歴を確認可能）
+- **自動 continue** —— OpenAI「capacity exceeded」ブロックを自動検出し、「continue」を送信してタスクを再開
 - **ブランチ・モデル・権限・モード** —— 一目で把握、推測不要
-- **Context ウィンドウ充填バー** —— 上限に近づくのをグラフィカルに確認
 - **MCP サーバー状況 & ツール呼び出し、skills & agent アクション** —— Codex が実際に何をしているか監視
-- **tmux** —— 設定不要で Codex CLI を tmux 内でネイティブ実行
+- **Context ウィンドウ充填バー** —— 上限に近づくのをグラフィカルに確認
 
 **Q: 複数の Codex セッションを同時に監視できますか？**
 
@@ -43,6 +49,12 @@ socket 上に nested client を開き、外側の session を維持します。H
 
 ## クイックスタート
 
+### ワンプロンプトでインストール（agent 向け）
+
+```bash
+codex-hud (https://github.com/fwyc0573/codex-hud) を、その README.md の手順に従って Codex CLI 用にインストールしてください。Codex の「capacity exceeded」を自動検出し「continue」を自動送信する場合は、cx-continue/ に移動して ./bin/cx-continue-ctl start を実行してください。
+```
+
 ### macOS/Linux（`main`）
 
 ```bash
@@ -53,6 +65,14 @@ git switch main
 
 # シェルをリフレッシュして、以下を入力：
 codex
+
+# Codex の「capacity exceeded」を自動検出し「continue」を自動送信する場合は、以下を使用：
+cd cx-continue
+./bin/cx-continue-ctl start     # バックグラウンドで起動
+./bin/cx-continue-ctl status    # 実行中かどうか、各 pane の動作を確認
+./bin/cx-continue-ctl stop      # 停止
+./bin/cx-continue-ctl restart   # 停止してから起動
+./bin/cx-continue-ctl logs      # ログを追跡
 ```
 
 ### Windows (WSL)（`feature/windows-support-dual-entry`）

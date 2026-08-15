@@ -13,16 +13,26 @@ Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex)
 
 ![Codex HUD — Single Session](./doc/fig/screenshot.png)
 
+
+## News
+
+- **[2026-08-15]** Added automatic detection of OpenAI upstream "capacity exceeded" blocks, with automatic "continue" handling. See `cx-continue/README.md` for usage.
+- **[2026-07-20]** Released the first stable version, v1.0, with full support for macOS and Linux.
+
+
+
 ## Why Codex HUD?
 
 **Q: Codex CLI already works. Why do I need a HUD?**
 
 Because you're flying blind without one. Codex HUD gives you a persistent dashboard at the bottom of your terminal:
-
+- **tmux** — natively run Codex CLI in an optimized tmux with zero setup (scroll up and down to review the conversation history)
+- **Auto-continue** — automatically detect OpenAI "capacity exceeded" blocks and resume the task by sending "continue"
 - **Branch, model, permission, mode** — at a glance, no guessing
-- **Context window fill bar** — graphically see when you're about to hit the wall
 - **MCP server status & tool calls, skills & agent actions** — watch what Codex is actually doing
-- **tmux** — natively run Codex CLI in tmux with zero setup
+- **Context window fill bar** — graphically see when you're about to hit the wall
+
+
 
 **Q: I run multiple Codex sessions. Can I monitor them all?**
 
@@ -42,10 +52,9 @@ session alive. Closing the HUD returns you to the original pane.
 
 ### One prompt to install (by agents)
 ```bash
-Install codex-hud (https://github.com/fwyc0573/codex-hud) for the Codex CLI by following the instructions in its README.md.
+Install codex-hud (https://github.com/fwyc0573/codex-hud) for the Codex CLI by following the instructions in its README.md. To enable automatic detection of Codex "capacity exceeded" and auto-send "continue", go to cx-continue/ and run ./bin/cx-continue-ctl start.
 
 ```
-
 
 ### macOS/Linux (`main`)
 
@@ -57,6 +66,14 @@ git switch main
 
 # Refresh your shell, then just type:
 codex
+
+# To enable automatic detection of Codex "capacity exceeded" and auto-send "continue", run:
+cd cx-continue
+./bin/cx-continue-ctl start     # start in the background
+./bin/cx-continue-ctl status    # is it running, and what is each pane doing
+./bin/cx-continue-ctl stop      # stop it
+./bin/cx-continue-ctl restart   # stop then start
+./bin/cx-continue-ctl logs      # follow the log
 ```
 
 ### Windows (WSL) (`feature/windows-support-dual-entry`)

@@ -17,16 +17,22 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 ![Codex HUD — 单 Session 模式](./doc/fig/screenshot.png)
 
+## 更新动态
+
+- **[2026-08-15]** 新增对 OpenAI 上游 “capacity exceeded” 的自动监测与自动 “continue” 处理。用法参见 `cx-continue/README.md`。
+- **[2026-07-20]** 发布首个正式版本 v1.0，完整支持 macOS 和 Linux。
+
 ## 为什么需要 Codex HUD？
 
 **Q: Codex CLI 本身就能用，为什么还需要 HUD？**
 
 因为没有它你就是在盲飞。Codex HUD 在终端底部提供一个持久的仪表盘：
 
+- **tmux** —— 零配置原生在优化过的 tmux 中运行 Codex CLI（可上下滑动查看对话记录）
+- **自动 continue** —— 自动监测 OpenAI “capacity exceeded” 阻断，并发送 “continue” 恢复任务
 - **分支、模型、权限、模式** —— 一目了然，不用猜
-- **Context 窗口填充条** —— 图形化显示何时即将触顶
 - **MCP 服务器状态 & 工具调用、skills & agent 动作** —— 看 Codex 实际在干什么
-- **tmux** —— 原生在 tmux 中运行 Codex CLI，零配置
+- **Context 窗口填充条** —— 图形化显示何时即将触顶
 
 **Q: 我同时跑多个 Codex session，能一起监控吗？**
 
@@ -43,6 +49,12 @@ tmux socket 上打开嵌套 client，并保留外层 session。关闭 HUD 后会
 
 ## 快速开始
 
+### 一句话安装（交给 agent）
+
+```bash
+按照 codex-hud (https://github.com/fwyc0573/codex-hud) 的 README.md 指引，为 Codex CLI 安装它。若要开启自动监测 Codex “capacity exceeded” 并自动发送 “continue”，请进入 cx-continue/ 目录执行 ./bin/cx-continue-ctl start。
+```
+
 ### macOS/Linux（`main`）
 
 ```bash
@@ -53,6 +65,14 @@ git switch main
 
 # 刷新 shell，然后直接输入：
 codex
+
+# 若要开启自动监测 Codex “capacity exceeded” 并自动发送 “continue”，请使用：
+cd cx-continue
+./bin/cx-continue-ctl start     # 后台启动
+./bin/cx-continue-ctl status    # 是否运行，以及各 pane 正在做什么
+./bin/cx-continue-ctl stop      # 停止
+./bin/cx-continue-ctl restart   # 先停止再启动
+./bin/cx-continue-ctl logs      # 跟踪日志
 ```
 
 ### Windows (WSL)（`feature/windows-support-dual-entry`）

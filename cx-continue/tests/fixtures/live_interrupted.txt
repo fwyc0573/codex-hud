@@ -1,0 +1,49 @@
+
+  - 该 lane 仍参与 dispatch barrier 和 combine barrier；
+  - EP group 的 participant 数固定为 [38;5;6mmoe_expert_parallel_size[39m；
+  - shared pre-routing work 仍按真实 workload 预测；
+  - lane-local grouped-GEMM / expert compute 为严格 [38;5;6m0[39m；
+  - dispatch/combine 使用该 lane 的真实 zero-payload 记录，由 communication backend 按实际 payload 预测；
+  - 不增加任何经验 latency、baseline latency 或 scaling factor。
+
+  这是最符合固定 physical EP world、collective 调用一致性和你定义的“等待最慢 EP rank”语义的方案。
+
+  [1;3m### B：按当前 layer 的 active lanes 动态缩小 collective[0m
+
+  - zero-routed lane 不进入该层的 dispatch/combine participant set；
+  - barrier 只等待实际收到 token 的 EP lanes；
+  - 每层 collective 的 participant 数可能不同。
+
+  优点是可以模拟 sparse collective 的潜在优化；代价是需要引入动态 collective topology，并重新定义 world size、通信 payload、metrics 和 layer identity。它不再是固定 EP world
+  的直接模拟。
+
+  [1;3m### C：保留 lane，但只参与逻辑 barrier，不调用 dispatch/combine collective[0m
+
+  - zero-routed lane 参与 layer completion barrier；
+  - 但该 lane 不进入实际 dispatch/combine communication；
+  - 需要额外定义“逻辑 barrier”和“physical collective”之间的时间关系。
+
+  这会避免动态修改 participant 数，但容易低估 collective 的固定参与开销，也容易造成 simulator 中的 barrier 与真实 collective 调用次数不一致。
+
+  [1m## 当前待办[0m
+
+  [38;5;12m1. [39m你裁决 zero-routed EP lane 的 participant 语义。
+  [38;5;12m2. [39m记录该决定后，继续裁决 mixed dense/MoE layer 的统一 layer contract。
+  [38;5;12m3. [39m再裁决 shared-domain communication ownership（dispatch/combine 的 collective 类型和计时归属）。
+  [38;5;12m4. [39m最后枚举并移除 legacy CLI、[38;5;6mdp_id[39m、[38;5;6mdata_parallel_size[39m 和 [38;5;6mdecode_attn_dp_lanes_for_ffn[39m 等旧语义。
+  [38;5;12m5. [39m所有语义裁决完成后，才进入正式 implementation plan；本阶段仍不修改代码。
+
+[48;5;237m
+[1;2m› [0m[48;5;237mA，continue
+
+
+[38;5;3m[49m⚠ Falling back from WebSockets to HTTPS transport. stream disconnected before completion: websocket closed by server before response.completed[39m
+
+[38;5;1m■ Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.[39m
+
+[48;5;237m
+[1m›[0m[48;5;237m [2mFind and fix a bug in @filename[0m[48;5;237m
+
+[49m  [38;2;246;226;183mgpt-5.6-sol max[2m[39m · [0m[38;2;171;223;167m/data/ycfeng/stepfun-performance-optimization/Frontier[39m
+
+

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# cx-continue: watch tmux-hosted codex CLI sessions and auto-retry capacity stalls.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+exec python3 -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/src')
+from cx_continue.cli import main
+sys.exit(main())
+" "$@"

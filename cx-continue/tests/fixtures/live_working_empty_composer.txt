@@ -1,0 +1,81 @@
+  当 [38;5;6mmoe_ep == 1[39m 时，这个问题被掩盖；当 mixed model 使用 [38;5;6mmoe_ep > 1[39m 时，当前 dense FFN 实际上按“单个 EP lane 的 TP domain”预测，而不是按它占用的完整 stage
+  world 预测。
+
+  按照已确认的 A，这里不需要新增 dense-specific CLI 参数。应从现有物理 topology 派生：
+
+  dense_ffn_tp = moe_tensor_parallel_size * moe_expert_parallel_size
+
+  这不是 scaling factor，而是确定 profile lookup 和 collective participant domain 的结构参数。
+
+  [1m还存在一个相同类型的命名问题[0m
+
+  [38;5;6mfrontier/scheduler/replica_stage_scheduler/replica_stage_schduler.py:268[39m 把 [38;5;6mEPBatchGroup[39m 和 [38;5;6mDenseFFNBatchGroup[39m 都标记为 [38;5;6mtokens_are_post_routing=True[39m。
+
+  但 dense FFN 根本没有 routing。当前代码只是借这个字段让 [38;5;6mfrontier/entities/batch_stage.py:138[39m 不直接修改原始 Request 状态。
+
+  这再次证明当前存在概念混用：
+
+  routing state
+  resource ownership
+  request-accounting ownership
+
+  三者目前被 lane 和 [38;5;6mpost_routing[39m 两个字段混在一起。后续应拆开表达，不能仅重命名 [38;5;6mdp_id[39m。
+
+  [1m对 dense model 和 mixed model 的统一结构[0m
+
+  纯 dense model:
+      创建 ReplicaExecutionContext
+      创建每个 StageExecutionContext
+      只有 FULL_STAGE_WORLD
+      不创建任何 EP child scheduler
+
+  mixed dense/MoE model:
+      创建 ReplicaExecutionContext
+      创建每个 StageExecutionContext
+      初始化固定 EP child resources
+
+      dense layer:
+          使用 FULL_STAGE_WORLD
+          ep_id = None
+          不进入 routing/dispatch/combine
+
+      MoE layer:
+          原子申请 EP_WAVE
+          启动完整 range(moe_ep)
+          按 ownership 分配 workload
+          dispatch -> local compute -> combine
+          barrier 后释放 StageExecutionContext
+
+  因此可以同时支持 dense、纯 MoE 和 mixed model，而且不需要逐 layer 创建或销毁 EP topology。
+
+  相关结论已经更新到 [38;5;6mtask_memory/task_2026-08-12_moe_ep_rank_stragger_analysis/design.md:186[39m、[38;5;6mtask_memory/task_2026-08-12_moe_ep_rank_stragger_analysis/[39m
+  [38;5;6missues.md:180[39m 和 [38;5;6mtask_memory/task_2026-08-12_moe_ep_rank_stragger_analysis/requirements.md:75[39m。本轮没有修改 production code、tests 或 CLI；用户已有的
+  [38;5;6mtests/scratch/probe_lookup_domain_gap.py[39m 未被触碰。StepCode Claude 独立审查未返回技术正文，因此没有把它视为批准或否决。
+
+  [1m待办事项[0m
+
+  - 裁决 parent arbiter 的具体结构。
+  - 明确 [38;5;6mExecutionScope[39m、wave identity 和 admission/release interface。
+  - 继续设计 co-location、PDD 和 PD-AF 共用的 per-layer execution flow。
+  - 将 dense TP、MoE lane TP、EP participant domain 分别建模。
+  - 后续 implementation plan 中清理 [38;5;6mdp_id[39m、dense [38;5;6mlane_id[39m、[38;5;6mtokens_are_post_routing[39m 混用及相关 metrics/event 接口。
+  - 后续补充 dense → MoE → dense → MoE、[38;5;6mPP>1[39m 和 [38;5;6mmoe_ep>1[39m 的完整测试矩阵。
+
+  [1m下一项 Grill-Me 裁决[0m
+
+  我推荐 [1mA[0m：
+
+  - [1mA，推荐：层次化 stage-local arbiter。[0m 一个 [38;5;6mReplicaExecutionContext[39m 管理多个 [38;5;6mStageExecutionContext[39m；每个 stage 在 [38;5;6mFULL_STAGE_WORLD[39m 和 [38;5;6mEP_WAVE[39m 之间原子仲
+    裁。语义最清楚，并保留 PP overlap。
+
+  - [1mB：扁平的 [0m[38;5;6m(replica_id, stage_id)[1m[39m resource scheduler。[0m 行为可以正确，但 Replica-level memory、metrics 和 debug state 会分散在多个模块中。
+  - [1mC：Replica-global 单一 arbiter。[0m 实现较简单，但会错误串行化不同 PP stages，不建议采用。
+
+  请裁决：是否正式采纳 [1mA：[0m[38;5;6mReplicaExecutionContext -> StageExecutionContext -> {FULL_STAGE_WORLD, EP_WAVE}[39m？
+
+[2m─ Worked for 26m 13s ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+[0m[48;5;237m
+[1m›[0m[48;5;237m [2mImprove documentation in @filename[0m[48;5;237m
+
+[49m  [38;2;246;226;183mgpt-5.6-sol max[2m[39m · [0m[38;2;171;223;167m/data/ycfeng/stepfun-performance-optimization/Frontier[39m

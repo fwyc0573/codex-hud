@@ -1,0 +1,49 @@
+  你已确认 TP 边界，我会继续在隔离 worktree 中收敛剩余实现。当前优先级是把 standalone、shared/E2E 三条 attention producer 的训练行和 feature schema 彻底统一；随后
+  补齐 domain hash、runtime/training TP 入口、explicit on-demand 边界的测试，再做完整回归和独立 review。CPU/PP overhead 的 zero 行为不会改。
+
+[2m• [0;1mStarted [0m[38;5;6m`/root/runtime_tp_ondemand_audit`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/wave_b_model_cache_contract`[39m
+
+[2m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• [0mYes, boss YC！
+
+  我已复现当前 branch 中一个真实的 contract 缺口：[38;5;6mexact_rows[39m domain 允许缺失或错误的 [38;5;6mtraining_key_digest[39m，说明 domain descriptor 的结构校验还不完整。与此同时，
+  attention mixed-prefill helper 对 list-valued 字段的 [38;5;6mpd.isna()[39m 处理存在数组歧义风险。我先用最小 RED 测试固定这两个根因，再让实现逐项变绿。
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/wave_b_model_cache_contract`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/wave_b_model_cache_contract`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/runtime_tp_ondemand_audit`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/runtime_tp_ondemand_audit`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/runtime_tp_ondemand_audit`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/runtime_tp_ondemand_audit`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/runtime_tp_ondemand_audit`[39m
+
+[2m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• [0mYes, boss YC！
+
+  当前关键 producer parity 已闭合到一个更具体的层面：不仅训练 schema 统一为 [38;5;6m(total_tokens, kv_cache_size, batch_size)[39m，runtime [38;5;6mattn_kv_cache_save[39m 也已改用完全相同
+  的三维 key；否则训练和运行仍会在不同维度上查找。接下来我正在跑跨模块回归，重点区分本次引入的问题与仓库原有的 logging harness 失败。
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/wave_b_model_cache_contract`[39m
+
+[2m• [0;1mInteracted with [0m[38;5;6m`/root/wave_b_model_cache_contract`[39m
+
+[48;5;237m
+[1;2m› [0m[48;5;237mcontinue
+
+
+[38;5;1m[49m■ stream disconnected before completion: websocket closed by server before response.completed[39m
+
+[48;5;237m
+[1m›[0m[48;5;237m continue
+
+[49m  [38;2;246;226;183mgpt-5.6-sol ultra[2m[39m · [0m[38;2;171;223;167m/data/ycfeng/stepfun-performance-optimization/Frontier[39m

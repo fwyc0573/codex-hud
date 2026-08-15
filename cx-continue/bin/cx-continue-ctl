@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# cx-continue-ctl: start, stop, and inspect the cx-continue watchdog.
+#
+# Keeps a pidfile so `status` can answer honestly and `start` refuses to launch a second
+# daemon. Two daemons on the same panes would each inject on their own schedule, doubling
+# the submission rate and defeating the configured cadence.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+STATE_DIR="${CX_CONTINUE_STATE_DIR:-/data/ycfeng/tmp}"
+PID_FILE="$STATE_DIR/cx-continue.pid"
+LOG_FILE="$STATE_DIR/cx-continue.log"
+STARTUP_ERROR_FILE="$STATE_DIR/cx-continue.startup-error"
+
+# Identifies our daemon in a process listing, so a recycled pid cannot be mistaken for it.
+PROCESS_MARKER="cx_continue.cli"
+
+usage() {
+    cat <<EOF
+Usage: cx-continue-ctl <command> [cx-continue options...]
+
+Commands:
+  start     Start the watchdog in the background (refuses if already running)
+  stop      Stop the running watchdog
+  restart   Stop then start
+  status    Report whether the watchdog is running, and what it is watching
+  logs      Follow the log file (Ctrl-C to stop following)
+
+Any extra arguments to 'start' are passed through to cx-continue, e.g.
+  cx-continue-ctl start --retry-interval 10
+  cx-continue-ctl start --exclude-session my-session
+
+Files:
+  pidfile   $PID_FILE
+  logs      $LOG_FILE plus up to three rotated backups (about 100 MiB total)
+  startup  $STARTUP_ERROR_FILE (removed by stop)
+Override the directory with CX_CONTINUE_STATE_DIR.
+EOF
+}
+
+# Echoes the pid when our daemon is running, otherwise nothing (exit 1).
+running_pid() {
+    [ -f "$PID_FILE" ] || return 1
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null)"
+    [ -n "$pid" ] || return 1
+    # A pid can be reused by an unrelated process after a crash or reboot, so confirm the
+    # command line is ours before reporting it as running or killing it.
+    if ps -p "$pid" -o args= 2>/dev/null | grep -q "$PROCESS_MARKER"; then
+        echo "$pid"
+        return 0
+    fi
+    return 1
+}
+
+cleanup_logs() {
+    local path
+    for path in "$LOG_FILE" "$LOG_FILE".* "$STARTUP_ERROR_FILE"; do
+        [ -e "$path" ] || continue
+        rm -f -- "$path"
+    done
+}
+
+cmd_start() {
+    local existing
+    if existing="$(running_pid)"; then
+        echo "cx-continue is already running (pid $existing)."
+        echo "Use 'cx-continue-ctl restart' to apply new options."
+        return 1
+    fi
+
+    if [ -f "$PID_FILE" ]; then
+        echo "Removing stale pidfile (no matching process)."
+        rm -f "$PID_FILE"
+    fi
+
+    mkdir -p "$STATE_DIR"
+
+    # Note the current log size so a failure report shows only this attempt's output
+    # instead of scrollback from previous runs.
+    local log_offset=0
+    [ -f "$LOG_FILE" ] && log_offset="$(wc -c < "$LOG_FILE" | tr -d ' ')"
+
+    # Argument-parsing errors go to stderr and never reach the log file, so capture stderr
+    # separately. Without this, a typo in a flag produces a bare "failed to start" with no
+    # explanation of what was wrong.
+    local err_file="$STARTUP_ERROR_FILE"
+    nohup "$SCRIPT_DIR/cx-continue" --log-file "$LOG_FILE" "$@" \
+        >/dev/null 2>"$err_file" &
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
+
+    # Confirm it survived startup rather than reporting success blindly: a bad option or a
+    # missing tmux makes the daemon exit immediately.
+    sleep 2
+    if ! running_pid >/dev/null; then
+        echo "cx-continue failed to start."
+        # stderr and the log file both receive validation errors, so merge and dedupe to
+        # avoid printing the same line twice.
+        local diagnostics
+        diagnostics="$(
+            {
+                [ -s "$err_file" ] && grep -v '^ *$' "$err_file" | tail -n 8
+                tail -c "+$((log_offset + 1))" "$LOG_FILE" 2>/dev/null | grep -v '^ *$'
+            } 2>/dev/null | sed 's/.*ERROR  */ERROR: /' | awk '!seen[$0]++'
+        )"
+        if [ -n "$diagnostics" ]; then
+            echo "$diagnostics" | sed 's/^/  /'
+        else
+            echo "  (no diagnostic output; run '$SCRIPT_DIR/cx-continue --help')"
+        fi
+        rm -f "$PID_FILE"
+        return 1
+    fi
+    echo "cx-continue started (pid $pid)."
+    grep "watching" "$LOG_FILE" | tail -n 1 | sed 's/^/  /'
+    echo "  log: $LOG_FILE"
+}
+
+cmd_stop() {
+    local pid
+    if ! pid="$(running_pid)"; then
+        echo "cx-continue is not running."
+        [ -f "$PID_FILE" ] && rm -f "$PID_FILE" && echo "Removed stale pidfile."
+        cleanup_logs
+        echo "Removed runtime logs."
+        return 0
+    fi
+
+    kill "$pid"
+    for _ in $(seq 20); do
+        running_pid >/dev/null || break
+        sleep 0.25
+    done
+
+    if running_pid >/dev/null; then
+        echo "cx-continue (pid $pid) did not exit on SIGTERM; sending SIGKILL."
+        kill -9 "$pid" 2>/dev/null
+        sleep 0.5
+        if running_pid >/dev/null; then
+            echo "cx-continue (pid $pid) is still running; logs were not removed."
+            return 1
+        fi
+    fi
+
+    rm -f "$PID_FILE"
+    cleanup_logs
+    echo "cx-continue stopped."
+    echo "Removed runtime logs."
+}
+
+cmd_status() {
+    local pid
+    if ! pid="$(running_pid)"; then
+        echo "cx-continue: NOT RUNNING"
+        if [ -f "$PID_FILE" ]; then
+            echo "  a stale pidfile exists at $PID_FILE"
+        fi
+        echo "  start it with: cx-continue-ctl start"
+        return 1
+    fi
+
+    local elapsed
+    elapsed="$(ps -p "$pid" -o etime= | tr -d ' ')"
+    echo "cx-continue: RUNNING (pid $pid, up $elapsed)"
+
+    # What it was told to do.
+    ps -p "$pid" -o args= | grep -o -- '--[a-z-]*\( [^ -][^ ]*\)\?' | sed 's/^/  option: /'
+
+    # What it is watching right now, and each pane's current state. Reporting live state
+    # per pane rather than a whole-log retry count: the log accumulates across sessions
+    # that have since closed, so a total there says nothing about the situation now.
+    echo "  panes:"
+    PYTHONPATH="$REPO_ROOT/src" python3 -c "
+import sys
+from cx_continue import tmux
+from cx_continue.detect import classify
+
+panes = tmux.list_codex_panes()
+if not panes:
+    print('    no codex panes found right now')
+    sys.exit(0)
+
+for pane in panes:
+    text = tmux.capture(pane.pane_id)
+    if text is None:
+        print(f'    {pane}  (closed while reading)')
+        continue
+    state = classify(text)
+    if state.should_retry:
+        label = 'STALLED - being retried'
+    elif state.is_working:
+        label = 'working'
+    elif (
+        (state.has_capacity_error or state.has_stream_disconnected_error)
+        and not state.composer_empty
+    ):
+        label = 'stalled, but composer has your text - left alone'
+    elif state.has_capacity_error or state.has_stream_disconnected_error:
+        label = 'error on screen, session idle'
+    else:
+        label = 'idle'
+    print(f'    {pane}  {label}')
+" 2>/dev/null || echo "    (could not read pane state)"
+
+    local recent
+    recent="$(grep "sent '" "$LOG_FILE" 2>/dev/null | tail -n 3)"
+    if [ -n "$recent" ]; then
+        echo "  recent retries:"
+        echo "$recent" | sed 's/^/    /'
+    else
+        echo "  recent retries: none yet"
+    fi
+    echo "  log: $LOG_FILE"
+}
+
+cmd_logs() {
+    [ -f "$LOG_FILE" ] || { echo "No log file at $LOG_FILE"; return 1; }
+    tail -n 30 -f "$LOG_FILE"
+}
+
+case "${1:-}" in
+    start)   shift; cmd_start "$@" ;;
+    stop)    shift; cmd_stop ;;
+    restart) shift; cmd_stop; cmd_start "$@" ;;
+    status)  shift; cmd_status ;;
+    logs)    shift; cmd_logs ;;
+    ""|-h|--help|help) usage ;;
+    *) echo "Unknown command: $1"; echo; usage; exit 2 ;;
+esac

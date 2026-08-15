@@ -3,7 +3,7 @@
  * Phase 3: Extended with ahead/behind sync status and file change counts
  */
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import type { GitStatus } from '../types.js';
 
 /**
@@ -11,17 +11,14 @@ import type { GitStatus } from '../types.js';
  * Returns null if the command fails
  */
 function execGit(args: string[], cwd?: string): string | null {
-  try {
-    const result = execSync(`git ${args.join(' ')}`, {
-      cwd: cwd || process.cwd(),
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000, // 5 second timeout
-    });
-    return result.trim();
-  } catch {
-    return null;
-  }
+  const result = spawnSync('git', args, {
+    cwd: cwd || process.cwd(),
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 5000, // 5 second timeout
+  });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.trim();
 }
 
 /**

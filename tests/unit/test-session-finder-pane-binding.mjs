@@ -17,34 +17,50 @@ function todayParts() {
   return { year, month, day };
 }
 
-function rolloutTimestampLabel(offsetMinutes = 0) {
-  const now = new Date(Date.now() + offsetMinutes * 60_000);
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hour = String(now.getHours()).padStart(2, '0');
-  const minute = String(now.getMinutes()).padStart(2, '0');
-  const second = String(now.getSeconds()).padStart(2, '0');
+function rolloutTimestampLabelAt(timestamp) {
+  const year = timestamp.getFullYear();
+  const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+  const day = String(timestamp.getDate()).padStart(2, '0');
+  const hour = String(timestamp.getHours()).padStart(2, '0');
+  const minute = String(timestamp.getMinutes()).padStart(2, '0');
+  const second = String(timestamp.getSeconds()).padStart(2, '0');
   return `${year}-${month}-${day}T${hour}-${minute}-${second}`;
 }
 
-function writeRollout(home, { sessionId, cwd, fileOffsetMinutes = 0, modifiedAt, extraLines = [] }) {
+function rolloutTimestampLabel(offsetMinutes = 0) {
+  return rolloutTimestampLabelAt(new Date(Date.now() + offsetMinutes * 60_000));
+}
+
+function writeRollout(home, {
+  sessionId,
+  cwd,
+  fileOffsetMinutes = 0,
+  fileTimestamp,
+  metadataTimestamp,
+  modifiedAt,
+  source = 'cli',
+  extraLines = [],
+}) {
   const { year, month, day } = todayParts();
   const dir = path.join(home, 'sessions', year, month, day);
   fs.mkdirSync(dir, { recursive: true });
 
-  const filePath = path.join(dir, `rollout-${rolloutTimestampLabel(fileOffsetMinutes)}-${sessionId}.jsonl`);
+  const timestampLabel = fileTimestamp
+    ? rolloutTimestampLabelAt(fileTimestamp)
+    : rolloutTimestampLabel(fileOffsetMinutes);
+  const filePath = path.join(dir, `rollout-${timestampLabel}-${sessionId}.jsonl`);
+  const sessionTimestamp = (metadataTimestamp ?? fileTimestamp ?? new Date()).toISOString();
   const lines = [
     JSON.stringify({
-      timestamp: new Date().toISOString(),
+      timestamp: sessionTimestamp,
       type: 'session_meta',
       payload: {
         id: sessionId,
-        timestamp: new Date().toISOString(),
+        timestamp: sessionTimestamp,
         cwd,
         originator: 'codex-tui',
         cli_version: '0.118.0',
-        source: 'cli',
+        source,
         model_provider: 'openai',
       },
     }),
@@ -139,6 +155,138 @@ try {
       boundRollout,
       'pane-bound shell snapshot should override the newest unrelated rollout'
     );
+
+    const snapshotPath = path.join(
+      home,
+      'shell_snapshots',
+      `${boundThread}.1775743876858615370.sh`
+    );
+    fs.unlinkSync(snapshotPath);
+    const retained = finder.check();
+    assert.ok(
+      retained,
+      'an established session must remain available after its shell snapshot disappears'
+    );
+    assertSamePath(
+      retained.path,
+      boundRollout,
+      'snapshot loss must not replace the established root rollout'
+    );
+  }
+
+  {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const thread = '019d7296-3ef8-7292-a039-fdf7ecd4f53e';
+    const snapshotPath = writeSnapshot(home, thread, '%70', 1775743876858615370n);
+    const finder = new SessionFinder(cwd);
+    assert.equal(
+      finder.check(),
+      null,
+      'an exact snapshot may arrive before its rollout is visible'
+    );
+
+    fs.unlinkSync(snapshotPath);
+    const rollout = writeRollout(home, {
+      sessionId: thread,
+      cwd,
+      modifiedAt: new Date(),
+    });
+    const resolved = finder.check();
+    assert.ok(
+      resolved,
+      'an accepted exact thread must remain resolvable after its snapshot disappears'
+    );
+    assertSamePath(
+      resolved.path,
+      rollout,
+      'snapshot loss before rollout visibility must retain the exact thread identity'
+    );
+  }
+
+  {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const targetStartTime = new Date(Date.now() - 40_000);
+    const rolloutTime = new Date(targetStartTime.getTime() + 10_000);
+    writeRollout(home, {
+      sessionId: '019d7298-3ef8-7292-a039-fdf7ecd4f53e',
+      cwd,
+      fileTimestamp: rolloutTime,
+      metadataTimestamp: rolloutTime,
+    });
+
+    const callbacks = [];
+    const finder = new SessionFinder(
+      cwd,
+      (session) => callbacks.push(session?.sessionId ?? null),
+      targetStartTime
+    );
+    const startedAt = Date.now();
+    assert.equal(
+      finder.check(),
+      null,
+      'a launch timestamp must not authorize heuristic binding without an exact pane snapshot'
+    );
+    assert.deepEqual(
+      callbacks,
+      [],
+      'a rejected heuristic candidate must not emit a session-change callback'
+    );
+    assert.ok(
+      Date.now() - startedAt < 1_000,
+      'rejecting heuristic startup binding must be immediate'
+    );
+  }
+
+  {
+    const home = makeTempCodexHome();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+
+    const oldThread = '019d729b-3ef8-7292-a039-fdf7ecd4f53e';
+    const newThread = '019d729c-3ef8-7292-a039-fdf7ecd4f53e';
+    const oldRollout = writeRollout(home, {
+      sessionId: oldThread,
+      cwd,
+      modifiedAt: new Date(Date.now() - 60_000),
+    });
+    const newRollout = writeRollout(home, {
+      sessionId: newThread,
+      cwd,
+      modifiedAt: new Date(),
+    });
+    const oldSnapshot = writeSnapshot(home, oldThread, '%70', 100n);
+    const newSnapshot = writeSnapshot(home, newThread, '%70', 200n);
+
+    const finder = new SessionFinder(cwd);
+    const resolved = finder.check();
+    assert.ok(resolved, 'newest snapshot should resolve');
+    assertSamePath(resolved.path, newRollout, 'newest snapshot should bind to the new thread');
+
+    fs.unlinkSync(newSnapshot);
+    const afterNewSnapshotRemoval = finder.check();
+    assert.ok(
+      afterNewSnapshotRemoval,
+      'removing the newest snapshot must not clear an existing binding while its rollout exists'
+    );
+    assertSamePath(
+      afterNewSnapshotRemoval.path,
+      newRollout,
+      'removing the newest snapshot must not roll back to an older snapshot thread'
+    );
+    assert.ok(fs.existsSync(oldSnapshot), 'the older fixture snapshot remains for rollback coverage');
+    assert.ok(fs.existsSync(oldRollout), 'the older fixture rollout remains for rollback coverage');
   }
 
   {

@@ -360,7 +360,13 @@ function readSnapshotPane(filePath: string): string | null {
   }
 }
 
-function findThreadIdForPane(mainPaneId: string): string | null {
+interface SnapshotBinding {
+  threadId: string;
+  nonce: bigint;
+  path: string;
+}
+
+function findSnapshotForPane(mainPaneId: string): SnapshotBinding | null {
   const snapshotsDir = path.join(getCodexHome(), SHELL_SNAPSHOTS_SUBDIR);
   if (!fs.existsSync(snapshotsDir)) {
     return null;
@@ -398,7 +404,7 @@ function findThreadIdForPane(mainPaneId: string): string | null {
     return a.nonce > b.nonce ? -1 : 1;
   });
 
-  return matches[0]?.threadId ?? null;
+  return matches[0] ?? null;
 }
 
 function findRolloutPathBySessionIdInRoot(rootDir: string, sessionId: string): string | null {
@@ -489,6 +495,9 @@ export class SessionFinder {
   private checkInterval: NodeJS.Timeout | null = null;
   private targetCwd: string | null = null;
   private currentThreadId: string | null = null;
+  private currentPaneId: string | null = null;
+  private snapshotNonceHighWater: bigint | null = null;
+  private bindingEstablished = false;
 
   constructor(
     targetCwd?: string,
@@ -522,51 +531,74 @@ export class SessionFinder {
   check(): SessionFile | null {
     const mainPaneId = process.env.CODEX_HUD_MAIN_PANE;
     if (!mainPaneId) {
-      if (this.currentSession || this.currentThreadId) {
-        this.currentSession = null;
-        this.currentThreadId = null;
-        this.onSessionChange?.(null);
-      }
+      this.resetBinding();
       return null;
     }
 
-    const threadId = findThreadIdForPane(mainPaneId);
-    if (!threadId) {
-      if (this.currentSession || this.currentThreadId) {
-        this.currentSession = null;
-        this.currentThreadId = null;
-        this.onSessionChange?.(null);
+    if (this.currentPaneId !== mainPaneId) {
+      if (this.currentPaneId !== null) {
+        this.resetBinding();
       }
-      return null;
+      this.currentPaneId = mainPaneId;
     }
 
-    if (
-      this.currentSession &&
-      this.currentSession.sessionId === threadId &&
-      fs.existsSync(this.currentSession.path)
-    ) {
-      try {
-        const stats = fs.statSync(this.currentSession.path);
-        this.currentSession.modifiedAt = stats.mtime;
-        this.currentSession.size = stats.size;
-      } catch {
-        // ignore stat errors
+    const snapshot = findSnapshotForPane(mainPaneId);
+    if (snapshot && this.acceptSnapshot(snapshot)) {
+      this.bindingEstablished = true;
+      this.currentThreadId = snapshot.threadId;
+
+      const next = findRolloutByThreadId(snapshot.threadId);
+      if (!next) {
+        this.clearSession();
+        return null;
       }
-      this.currentThreadId = threadId;
+
+      return this.adoptSession(next);
+    }
+
+    if (this.currentSession && fs.existsSync(this.currentSession.path)) {
+      this.refreshSessionStats();
       return this.currentSession;
     }
 
-    this.currentThreadId = threadId;
-    const next = findRolloutByThreadId(threadId);
-
-    if (!next) {
-      if (this.currentSession) {
-        this.currentSession = null;
-        this.onSessionChange?.(null);
+    if (this.bindingEstablished && this.currentThreadId) {
+      const pinned = findRolloutByThreadId(this.currentThreadId);
+      if (pinned) {
+        return this.adoptSession(pinned);
       }
+      this.clearSession();
       return null;
     }
 
+    this.clearSession();
+    return null;
+  }
+
+  /**
+   * Get the current session
+   */
+  getCurrentSession(): SessionFile | null {
+    return this.currentSession;
+  }
+
+  private acceptSnapshot(snapshot: SnapshotBinding): boolean {
+    if (this.snapshotNonceHighWater === null) {
+      this.snapshotNonceHighWater = snapshot.nonce;
+      return true;
+    }
+
+    if (snapshot.nonce > this.snapshotNonceHighWater) {
+      this.snapshotNonceHighWater = snapshot.nonce;
+      return true;
+    }
+
+    return (
+      snapshot.nonce === this.snapshotNonceHighWater &&
+      snapshot.threadId === this.currentThreadId
+    );
+  }
+
+  private adoptSession(next: SessionFile): SessionFile {
     if (!this.currentSession || this.currentSession.path !== next.path) {
       this.currentSession = next;
       this.onSessionChange?.(next);
@@ -577,10 +609,39 @@ export class SessionFinder {
     return this.currentSession;
   }
 
-  /**
-   * Get the current session
-   */
-  getCurrentSession(): SessionFile | null {
-    return this.currentSession;
+  private refreshSessionStats(): void {
+    if (!this.currentSession) {
+      return;
+    }
+
+    try {
+      const stats = fs.statSync(this.currentSession.path);
+      this.currentSession.modifiedAt = stats.mtime;
+      this.currentSession.size = stats.size;
+    } catch {
+      // The existence check immediately before this method covers the normal path.
+    }
+  }
+
+  private clearSession(): void {
+    if (this.currentSession !== null) {
+      this.currentSession = null;
+      this.onSessionChange?.(null);
+    }
+  }
+
+  private resetBinding(): void {
+    const hadState =
+      this.currentSession !== null ||
+      this.currentThreadId !== null ||
+      this.currentPaneId !== null;
+    this.currentSession = null;
+    this.currentThreadId = null;
+    this.currentPaneId = null;
+    this.snapshotNonceHighWater = null;
+    this.bindingEstablished = false;
+    if (hadState) {
+      this.onSessionChange?.(null);
+    }
   }
 }

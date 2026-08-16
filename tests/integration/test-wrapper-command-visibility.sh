@@ -8,10 +8,11 @@ FAKE_BIN_ROOT="$(mktemp -d)"
 FAKE_BIN_DIR="$FAKE_BIN_ROOT/codex dir;\$(marker)"
 LOG_FILE="$(mktemp)"
 OUTPUT_FILE="$(mktemp)"
+NODE_LOG_FILE="$(mktemp)"
 
 cleanup() {
   rm -rf "$FAKE_BIN_ROOT"
-  rm -f "$LOG_FILE" "$OUTPUT_FILE"
+  rm -f "$LOG_FILE" "$OUTPUT_FILE" "$NODE_LOG_FILE"
 }
 trap cleanup EXIT
 
@@ -24,6 +25,9 @@ FAKE
 
 cat > "$FAKE_BIN_DIR/node" <<'FAKE'
 #!/usr/bin/env bash
+if [[ -n "${NODE_LOG_FILE:-}" ]]; then
+  printf '%s\n' "$*" >> "$NODE_LOG_FILE"
+fi
 if [[ "${1:-}" == "--version" ]]; then
   echo "v20.11.0"
 fi
@@ -47,7 +51,9 @@ FAKE
 chmod +x "$FAKE_BIN_DIR/codex" "$FAKE_BIN_DIR/node" "$FAKE_BIN_DIR/npm" "$FAKE_BIN_DIR/tput"
 
 export PATH="$FAKE_BIN_DIR:$FAKE_TMUX_DIR:$PATH"
-export CODEX_HUD_UPDATE_CHECK=0
+export CODEX_HUD_UPDATE_CHECK=1
+export CODEX_HUD_SHELL_PATH="/bin/zsh"
+export NODE_LOG_FILE
 export CODEX_HUD_HEIGHT=5
 export CODEX_HUD_HEIGHT_AUTO=0
 export TMUX_LOG_FILE="$LOG_FILE"
@@ -87,7 +93,7 @@ if [[ -z "$launch_line" ]]; then
   exit 1
 fi
 
-for required in '@codex_hud_client_attached' 'cd ' 'codex' 'tmux kill-session'; do
+for required in '@codex_hud_client_attached' 'zsh' '-ilc' 'codex'; do
   if [[ "$launch_line" != *"$required"* ]]; then
     echo "respawn-pane launch is missing required component: $required" >&2
     echo "$launch_line" >&2
@@ -95,16 +101,24 @@ for required in '@codex_hud_client_attached' 'cd ' 'codex' 'tmux kill-session'; 
   fi
 done
 
+if ! grep -F -- '-ilc' "$LOG_FILE" >/dev/null; then
+  echo "Codex launch was not routed through an interactive login zsh." >&2
+  cat "$LOG_FILE" >&2
+  exit 1
+fi
+
 escaped_codex_path="$(printf '%q' "$FAKE_BIN_DIR/codex")"
-if [[ "$launch_line" != *"$escaped_codex_path"* ]]; then
+double_escaped_codex_path="$(printf '%q' "$escaped_codex_path")"
+if [[ "$launch_line" != *"$double_escaped_codex_path"* ]]; then
   echo "Codex executable path was not shell-quoted in the respawn command." >&2
-  echo "expected=$escaped_codex_path" >&2
+  echo "expected=$double_escaped_codex_path" >&2
   echo "$launch_line" >&2
   exit 1
 fi
-if [[ "$launch_line" == *"$FAKE_BIN_DIR/codex"* ]]; then
-  echo "Raw metacharacter path leaked into the respawn shell command." >&2
-  echo "$launch_line" >&2
+
+if ! grep -F -- "check --checkout $ROOT_DIR" "$NODE_LOG_FILE" >/dev/null; then
+  echo "Update check did not use the codex-hud checkout." >&2
+  cat "$NODE_LOG_FILE" >&2
   exit 1
 fi
 

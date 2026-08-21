@@ -104,7 +104,10 @@ if [[ -z "$respawn_command" ]]; then
   exit 1
 fi
 
-if ! /bin/sh -c "${respawn_command%%; tmux kill-session*}: true" >/dev/null 2>&1; then
+# Parse only the cwd/argument prefix; the lifecycle branch is validated by the
+# real-tmux failure regression.
+launch_prefix="${respawn_command%%; codex_status=*}"
+if ! /bin/sh -c "$launch_prefix; : true" >/dev/null 2>&1; then
   echo "POSIX shell could not parse the generated cwd command" >&2
   printf '%s\n' "$respawn_command" >&2
   exit 1

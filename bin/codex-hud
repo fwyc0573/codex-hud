@@ -65,6 +65,12 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+shell_quote() {
+    local value="$1"
+    value="${value//\'/\'\\\'\'}"
+    printf "'%s'" "$value"
+}
+
 update_checks_disabled() {
     local value="${CODEX_HUD_UPDATE_CHECK:-}"
     value=$(printf "%s" "$value" | tr '[:upper:]' '[:lower:]')
@@ -203,7 +209,7 @@ session_project_slug() {
         project_name="root"
     fi
 
-    project_name=$(printf "%s" "$project_name" | LC_ALL=C tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
+    project_name=$(printf "%s" "$project_name" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
     if [[ -z "$project_name" ]]; then
         project_name="proj-$(hash_cwd "$1")"
     fi
@@ -601,7 +607,7 @@ create_session() {
     shift
     local codex_args=("$@")
     local cwd_escaped
-    cwd_escaped=$(printf "%q" "$cwd")
+    cwd_escaped=$(shell_quote "$cwd")
     
     # Calculate terminal dimensions
     local term_height
@@ -614,9 +620,9 @@ create_session() {
     # Quote the resolved executable path before embedding it in the pane shell
     # command. PATH entries may contain spaces or shell metacharacters.
     local codex_cmd
-    codex_cmd=$(printf "%q" "$CODEX_CLI_PATH")
+    codex_cmd=$(shell_quote "$CODEX_CLI_PATH")
     for arg in "${codex_args[@]}"; do
-        codex_cmd="$codex_cmd $(printf "%q" "$arg")"
+        codex_cmd="$codex_cmd $(shell_quote "$arg")"
     done
     
     # Create new detached session

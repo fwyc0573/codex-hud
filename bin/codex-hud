@@ -205,7 +205,7 @@ session_project_slug() {
 
     project_name=$(printf "%s" "$project_name" | LC_ALL=C tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
     if [[ -z "$project_name" ]]; then
-        error "Unable to derive a safe project name from: $1"
+        project_name="proj-$(hash_cwd "$1")"
     fi
     printf "%.32s" "$project_name"
 }

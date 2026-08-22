@@ -26,7 +26,22 @@ HUD_DIR="$(dirname "$SCRIPT_DIR")"
 HUD_HEIGHT="${CODEX_HUD_HEIGHT:-}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 ALIAS_MARKER="# codex-hud alias"
-CODEX_CLI_PATH=""
+# Keep provider classification in one table. Adding a launch profile requires
+# one row here; the tmux lifecycle below consumes the resolved command vector
+# without provider-specific branches.
+LAUNCH_PROFILE_REGISTRY=(
+    "native|codex||||"
+    "stepcode|stepcode|codex|/.stepcode/codex|/.codex/sessions|stepcode"
+)
+LAUNCH_PROFILE="native"
+LAUNCH_PROFILE_EXECUTABLE=""
+LAUNCH_PROFILE_SUBCOMMAND=""
+LAUNCH_PROFILE_CODEX_HOME_SUFFIX=""
+LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX=""
+LAUNCH_PROFILE_SESSION_TAG=""
+CODEX_CLI_COMMAND=()
+CODEX_HOME_OVERRIDE=""
+CODEX_SESSIONS_OVERRIDE=""
 UPDATE_HELPER_PATH="$SCRIPT_DIR/codex-hud-update.mjs"
 UPDATE_UPGRADE_PATH="$SCRIPT_DIR/codex-hud-upgrade"
 FORCE_ATTACH="0"
@@ -219,21 +234,105 @@ session_project_slug() {
 # Generate a project-readable session name while retaining path uniqueness.
 PROJECT_SLUG="$(session_project_slug "$PWD")"
 SESSION_HASH="$(hash_cwd "$PWD")"
-SESSION_PREFIX="codex-hud-${PROJECT_SLUG}-${SESSION_HASH}"
-SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
+SESSION_PREFIX=""
+SESSION_NAME=""
 
-resolve_codex_cli() {
+refresh_session_identity() {
+    if [[ -n "$LAUNCH_PROFILE_SESSION_TAG" ]]; then
+        SESSION_PREFIX="codex-hud-${LAUNCH_PROFILE_SESSION_TAG}-${PROJECT_SLUG}-${SESSION_HASH}"
+    else
+        SESSION_PREFIX="codex-hud-${PROJECT_SLUG}-${SESSION_HASH}"
+    fi
+    SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
+}
+
+refresh_session_identity
+
+resolve_launch_profile() {
+    local profile_found="0"
+    local registry_entry
+
+    for registry_entry in "${LAUNCH_PROFILE_REGISTRY[@]}"; do
+        local profile_name
+        local executable
+        local subcommand
+        local codex_home_suffix
+        local codex_sessions_suffix
+        local session_tag
+        IFS='|' read -r profile_name executable subcommand codex_home_suffix codex_sessions_suffix session_tag <<< "$registry_entry"
+        if [[ "$profile_name" == "$LAUNCH_PROFILE" ]]; then
+            LAUNCH_PROFILE_EXECUTABLE="$executable"
+            LAUNCH_PROFILE_SUBCOMMAND="$subcommand"
+            LAUNCH_PROFILE_CODEX_HOME_SUFFIX="$codex_home_suffix"
+            LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX="$codex_sessions_suffix"
+            LAUNCH_PROFILE_SESSION_TAG="$session_tag"
+            profile_found="1"
+            break
+        fi
+    done
+
+    if [[ "$profile_found" != "1" ]]; then
+        error "Unsupported Codex launch profile: $LAUNCH_PROFILE"
+    fi
+}
+
+resolve_launch_command() {
+    resolve_launch_profile
+
+    if [[ -n "$LAUNCH_PROFILE_CODEX_HOME_SUFFIX" ]]; then
+        if [[ -z "${HOME:-}" ]]; then
+            error "HOME is required for the selected Codex launch profile."
+        fi
+        CODEX_HOME_OVERRIDE="${HOME%/}$LAUNCH_PROFILE_CODEX_HOME_SUFFIX"
+    else
+        CODEX_HOME_OVERRIDE=""
+    fi
+    if [[ -n "$LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX" ]]; then
+        if [[ -z "${HOME:-}" ]]; then
+            error "HOME is required for the selected Codex launch profile."
+        fi
+        CODEX_SESSIONS_OVERRIDE="${HOME%/}$LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX"
+    else
+        CODEX_SESSIONS_OVERRIDE=""
+    fi
+
     local path
-    path=$(command -v codex 2>/dev/null || true)
-    if [[ -z "$path" ]]; then
-        error "codex CLI is not found in PATH.
-
-Install Codex CLI from: https://github.com/openai/codex"
+    path=$(command -v "$LAUNCH_PROFILE_EXECUTABLE" 2>/dev/null || true)
+    if [[ -z "$path" || ! -x "$path" ]]; then
+        error "$LAUNCH_PROFILE_EXECUTABLE CLI is not found as an executable in PATH."
     fi
     if [[ "$path" == "$SCRIPT_DIR/codex-hud" ]]; then
-        error "codex resolves to codex-hud wrapper. Fix your alias to point to the real codex CLI."
+        error "$LAUNCH_PROFILE_EXECUTABLE resolves to codex-hud wrapper. Fix the launch command to point to the real executable."
     fi
-    CODEX_CLI_PATH="$path"
+
+    CODEX_CLI_COMMAND=("$path")
+    if [[ -n "$LAUNCH_PROFILE_SUBCOMMAND" ]]; then
+        CODEX_CLI_COMMAND+=("$LAUNCH_PROFILE_SUBCOMMAND")
+    fi
+}
+
+prepare_launch_profile_home() {
+    if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
+        if ! mkdir -p "$CODEX_HOME_OVERRIDE"; then
+            error "Unable to create the managed Codex home: $CODEX_HOME_OVERRIDE"
+        fi
+    fi
+    if [[ -n "$CODEX_SESSIONS_OVERRIDE" ]]; then
+        if ! mkdir -p "$CODEX_SESSIONS_OVERRIDE"; then
+            error "Unable to create the Codex sessions directory: $CODEX_SESSIONS_OVERRIDE"
+        fi
+    fi
+}
+
+launch_environment_prefix() {
+    local prefix=""
+    if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
+        prefix="CODEX_HOME=$(shell_quote "$CODEX_HOME_OVERRIDE") "
+    fi
+    if [[ -n "$CODEX_SESSIONS_OVERRIDE" ]]; then
+        prefix="${prefix}CODEX_SESSIONS_PATH=$(shell_quote "$CODEX_SESSIONS_OVERRIDE") "
+    fi
+    printf "%s" "$prefix"
 }
 
 # Get zsh rc file location (respects ZDOTDIR when set)
@@ -353,6 +452,14 @@ Please install tmux manually:
 # Check dependencies (with auto-install for tmux)
 check_dependencies() {
     # Check tmux - auto-install if missing
+    if ! command_exists node; then
+        error "Node.js is required but not installed.
+
+Install Node.js 18+ from: https://nodejs.org/"
+    fi
+
+    resolve_launch_command
+
     if ! command_exists tmux; then
         warn "tmux is not installed."
         echo ""
@@ -363,14 +470,6 @@ check_dependencies() {
         else
             error "tmux is required for codex-hud. Please install it manually."
         fi
-    fi
-    
-    resolve_codex_cli
-    
-    if ! command_exists node; then
-        error "Node.js is required but not installed.
-
-Install Node.js 18+ from: https://nodejs.org/"
     fi
 }
 
@@ -615,15 +714,28 @@ create_session() {
     term_height=$(tput lines 2>/dev/null || echo 24)
     term_width=$(tput cols 2>/dev/null || echo 80)
     resolve_hud_height "$term_height"
+    prepare_launch_profile_home
     
-    # Build the codex command string
-    # Quote the resolved executable path before embedding it in the pane shell
-    # command. PATH entries may contain spaces or shell metacharacters.
-    local codex_cmd
-    codex_cmd=$(shell_quote "$CODEX_CLI_PATH")
+    # Build the launch command string from the resolved profile vector.
+    # Quote every executable, subcommand, and forwarded argument before
+    # embedding the command in the tmux pane shell.
+    local codex_cmd=""
+    local command_part
+    for command_part in "${CODEX_CLI_COMMAND[@]}"; do
+        if [[ -z "$codex_cmd" ]]; then
+            codex_cmd=$(shell_quote "$command_part")
+        else
+            codex_cmd="$codex_cmd $(shell_quote "$command_part")"
+        fi
+    done
     for arg in "${codex_args[@]}"; do
         codex_cmd="$codex_cmd $(shell_quote "$arg")"
     done
+    local launch_env_prefix
+    launch_env_prefix=$(launch_environment_prefix)
+    if [[ -n "$launch_env_prefix" ]]; then
+        codex_cmd="$launch_env_prefix$codex_cmd"
+    fi
     
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
@@ -690,7 +802,9 @@ create_session() {
     # Split the window based on HUD_POSITION
     local session_start
     session_start=$(date +%s)
-    local hud_cmd="cd ${cwd_escaped} && LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD=${cwd_escaped} CODEX_HUD_MAIN_PANE='$main_pane_id' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' CODEX_HUD_CLEAR_SCROLLBACK='${CODEX_HUD_CLEAR_SCROLLBACK:-}' node '$HUD_DIR/dist/index.js'"
+    local hud_env_prefix
+    hud_env_prefix=$(launch_environment_prefix)
+    local hud_cmd="cd ${cwd_escaped} && ${hud_env_prefix}LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD=${cwd_escaped} CODEX_HUD_MAIN_PANE='$main_pane_id' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' CODEX_HUD_CLEAR_SCROLLBACK='${CODEX_HUD_CLEAR_SCROLLBACK:-}' node '$HUD_DIR/dist/index.js'"
     
     if [[ "$HUD_POSITION" == "top" ]]; then
         # Split at top, then swap panes
@@ -731,6 +845,9 @@ main() {
             --new-session)
                 FORCE_NEW_SESSION="1"
                 ;;
+            --stepcode)
+                LAUNCH_PROFILE="stepcode"
+                ;;
             --)
                 shift
                 codex_args+=("$@")
@@ -742,6 +859,8 @@ main() {
         esac
         shift
     done
+    resolve_launch_profile
+    refresh_session_identity
 
     # Check dependencies
     check_dependencies
@@ -810,6 +929,7 @@ Options:
   --list              List all codex-hud sessions
   --attach            Attach to latest existing session in this directory
   --new-session       Always create a new session for this launch
+  --stepcode          Launch StepCode Codex through \`stepcode codex\`
 
 Environment Variables:
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
@@ -828,7 +948,7 @@ Environment Variables:
 Requirements:
   - tmux (auto-installed if missing)
   - Node.js 18+
-  - Codex CLI
+  - Codex CLI or StepCode CLI
 
 Examples:
   codex-hud                    Start Codex with HUD
@@ -837,6 +957,7 @@ Examples:
   codex-hud --kill             Kill existing session
   codex-hud --attach            Reuse existing session intentionally
   codex-hud --new-session       Force a new session
+  codex-hud --stepcode --new-session  Start StepCode Codex with HUD
   CODEX_HUD_POSITION=top codex-hud  HUD on top
 
 For more information, see: https://github.com/openai/codex
@@ -937,6 +1058,31 @@ list_sessions() {
 }
 
 # Check for special flags first
+normalize_launch_profile_args() {
+    local normalized_args=()
+    local before_separator="1"
+    local arg
+
+    for arg in "$@"; do
+        if [[ "$before_separator" == "1" && "$arg" == "--stepcode" ]]; then
+            LAUNCH_PROFILE="stepcode"
+            continue
+        fi
+        normalized_args+=("$arg")
+        if [[ "$before_separator" == "1" && "$arg" == "--" ]]; then
+            before_separator="0"
+        fi
+    done
+
+    NORMALIZED_ARGS=("${normalized_args[@]}")
+}
+
+NORMALIZED_ARGS=()
+normalize_launch_profile_args "$@"
+set -- "${NORMALIZED_ARGS[@]}"
+resolve_launch_profile
+refresh_session_identity
+
 case "${1:-}" in
     -h|--help)
         show_help

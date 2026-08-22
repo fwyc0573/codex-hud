@@ -471,7 +471,7 @@ function buildSessionFile(filePath: string): SessionFile | null {
 export function findRolloutByThreadId(threadId: string): SessionFile | null {
   const codexHome = getCodexHome();
   const activePath = findRolloutPathBySessionIdInRoot(
-    path.join(codexHome, 'sessions'),
+    getSessionsDir({ requireExisting: false }),
     threadId
   );
   if (activePath) {

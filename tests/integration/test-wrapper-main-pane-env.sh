@@ -4,12 +4,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FAKE_TMUX_DIR="$SCRIPT_DIR/fake-tmux"
-FAKE_BIN_DIR="$(mktemp -d)"
+TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-main-pane-env-XXXXXX)"
+FAKE_BIN_DIR="$TEST_ROOT/fake-bin"
+LOG_FILE="$TEST_ROOT/tmux.log"
+OUTPUT_LOG="$TEST_ROOT/wrapper.log"
 
 cleanup() {
-  rm -rf "$FAKE_BIN_DIR"
+  rm -rf "$TEST_ROOT"
 }
 trap cleanup EXIT
+
+mkdir -p "$FAKE_BIN_DIR"
 
 cat > "$FAKE_BIN_DIR/codex" <<'FAKE'
 #!/usr/bin/env bash
@@ -49,8 +54,7 @@ export PATH="$FAKE_BIN_DIR:$FAKE_TMUX_DIR:$PATH"
 export CODEX_HUD_HEIGHT="5"
 export CODEX_HUD_HEIGHT_AUTO="0"
 
-log_file="$(mktemp)"
-export TMUX_LOG_FILE="$log_file"
+export TMUX_LOG_FILE="$LOG_FILE"
 export TMUX_MAIN_PANE_ID="%1"
 export TMUX_PANE_ID="%2"
 export TMUX_PANES=$'%1\n%2'
@@ -65,17 +69,17 @@ export TMUX_PANE_HEIGHT="5"
 export TMUX_MAIN_PANE_IN_MODE="0"
 export TMUX_REJECT_TARGET_0="1"
 
-"$ROOT_DIR/bin/codex-hud" >/tmp/codex-hud-main-pane-test.log 2>&1
+"$ROOT_DIR/bin/codex-hud" >"$OUTPUT_LOG" 2>&1
 
-if ! grep -q '^split-window ' "$log_file"; then
+if ! grep -q '^split-window ' "$LOG_FILE"; then
   echo "expected split-window command in fake tmux log" >&2
-  cat "$log_file" >&2
+  cat "$LOG_FILE" >&2
   exit 1
 fi
 
-if ! grep -q "CODEX_HUD_MAIN_PANE='%1'" "$log_file"; then
+if ! grep -q "CODEX_HUD_MAIN_PANE='%1'" "$LOG_FILE"; then
   echo "expected HUD command to include CODEX_HUD_MAIN_PANE for pane-bound session resolution" >&2
-  cat "$log_file" >&2
+  cat "$LOG_FILE" >&2
   exit 1
 fi
 

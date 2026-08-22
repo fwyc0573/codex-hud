@@ -43,8 +43,14 @@ export function getCodexHome(): string {
   );
 }
 
-export function getSessionsDir(): string {
+export function getSessionsDir(options: { requireExisting?: boolean } = {}): string {
+  const requireExisting = options.requireExisting ?? true;
+
   if (process.env.CODEX_SESSIONS_PATH) {
+    if (!requireExisting) {
+      return process.env.CODEX_SESSIONS_PATH;
+    }
+
     const overridePath = resolveExistingDirectory(process.env.CODEX_SESSIONS_PATH);
     if (!overridePath) {
       throw new Error(
@@ -56,6 +62,10 @@ export function getSessionsDir(): string {
 
   const home = getCodexHome();
   const sessionsDir = path.join(home, 'sessions');
+  if (!requireExisting) {
+    return sessionsDir;
+  }
+
   const resolved = resolveExistingDirectory(sessionsDir);
   if (!resolved) {
     throw new Error(

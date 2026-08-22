@@ -795,6 +795,14 @@ create_session() {
     local codex_launch_cmd
     codex_launch_cmd="$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; codex_status=\$?; if [ \"\$codex_status\" -eq 130 ]; then if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return interrupt status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; if [ \"\$codex_status\" -ne 0 ]; then printf '\\n[codex-hud] Codex exited with status %s. Press Enter to close.\\n' \"\$codex_status\" >&2; if ! IFS= read -r _codex_hud_close; then printf '[codex-hud] Input closed before acknowledgement; returning status %s.\\n' \"\$codex_status\" >&2; fi; if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; tmux kill-session -t '$SESSION_NAME'"
     tmux respawn-pane -k -t "$main_pane_id" "$codex_launch_cmd"
+
+    # StepCode can deliver SIGINT to the full foreground process group, which
+    # ends this pane shell before the inline teardown above can run. Keep the
+    # pane exit metadata and let tmux return status 130 independently.
+    local pane_died_cmd
+    pane_died_cmd="if-shell -F '#{==:#{pane_dead_signal},2}' \"detach-client -s '$SESSION_NAME' -E 'exit 130'\" ; kill-session -t '$SESSION_NAME'"
+    tmux set-option -p -t "$main_pane_id" remain-on-exit on
+    tmux set-option -p -t "$main_pane_id" pane-died "$pane_died_cmd"
     
     # Wait a moment for the session to be ready
     sleep 0.2

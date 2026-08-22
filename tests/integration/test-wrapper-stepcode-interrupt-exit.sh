@@ -12,15 +12,19 @@ TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-stepcode-interrupt-XXXXXX)"
 FAKE_BIN="$TEST_ROOT/bin"
 TMUX_TMPDIR="$TEST_ROOT/tmux"
 INPUT_FIFO="$TEST_ROOT/input.fifo"
+DECOY_INPUT_FIFO="$TEST_ROOT/decoy-input.fifo"
 PTY_LOG="$TEST_ROOT/pty.log"
+DECOY_PTY_LOG="$TEST_ROOT/decoy-pty.log"
 TRACE_FILE="$TEST_ROOT/stepcode.trace"
 LAUNCHER="$TEST_ROOT/launch-wrapper.sh"
 SENTINEL_SESSION="stepcode-interrupt-sentinel-$$"
+DECOY_SESSION=""
 SESSION_NAME=""
 WRAPPER_PID=""
+DECOY_PID=""
 
 mkdir -p "$FAKE_BIN" "$TMUX_TMPDIR" "$TEST_ROOT/home"
-mkfifo "$INPUT_FIFO"
+mkfifo "$INPUT_FIFO" "$DECOY_INPUT_FIFO"
 
 tmux_cmd() {
   TMUX= TMUX_TMPDIR="$TMUX_TMPDIR" tmux -f /dev/null "$@"
@@ -30,6 +34,9 @@ cleanup() {
   if [[ -n "$WRAPPER_PID" ]] && kill -0 "$WRAPPER_PID" 2>/dev/null; then
     kill "$WRAPPER_PID" 2>/dev/null || true
   fi
+  if [[ -n "$DECOY_PID" ]] && kill -0 "$DECOY_PID" 2>/dev/null; then
+    kill "$DECOY_PID" 2>/dev/null || true
+  fi
   tmux_cmd kill-server >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -38,8 +45,11 @@ fail() {
   echo "test-wrapper-stepcode-interrupt-exit: FAIL - $1" >&2
   echo "test_root=$TEST_ROOT" >&2
   echo "session=$SESSION_NAME" >&2
+  echo "decoy_session=$DECOY_SESSION" >&2
   echo "--- PTY output ---" >&2
   cat "$PTY_LOG" >&2 2>/dev/null || true
+  echo "--- Decoy PTY output ---" >&2
+  cat "$DECOY_PTY_LOG" >&2 2>/dev/null || true
   echo "--- StepCode trace ---" >&2
   cat "$TRACE_FILE" >&2 2>/dev/null || true
   if [[ -n "$SESSION_NAME" ]]; then
@@ -52,7 +62,7 @@ cat > "$FAKE_BIN/stepcode" <<'FAKE_STEPCODE'
 #!/usr/bin/env bash
 set -u
 printf 'stepcode_start pid=%s\n' "$$" >> "${TRACE:?}"
-trap 'printf "stepcode_sigint pid=%s\n" "$$" >> "${TRACE:?}"; exit 130' INT
+trap 'printf "stepcode_sigint pid=%s\n" "$$" >> "${TRACE:?}"; kill -INT "$PPID" 2>/dev/null || true; exit 130' INT
 while :; do
   sleep 1
 done
@@ -80,6 +90,7 @@ FAKE_TPUT
 
 chmod +x "$FAKE_BIN/stepcode" "$FAKE_BIN/node" "$FAKE_BIN/tput"
 : > "$PTY_LOG"
+: > "$DECOY_PTY_LOG"
 : > "$TRACE_FILE"
 
 # Seed the isolated tmux server with the fake command environment before any
@@ -108,6 +119,7 @@ EOF
 chmod +x "$LAUNCHER"
 
 exec 3<>"$INPUT_FIFO"
+exec 4<>"$DECOY_INPUT_FIFO"
 script -qefc "bash $(printf '%q' "$LAUNCHER")" "$PTY_LOG" <&3 &
 WRAPPER_PID=$!
 
@@ -135,9 +147,28 @@ tmux_cmd list-clients -F '#{session_name}' 2>/dev/null |
   grep -Fqx "$SESSION_NAME" ||
   fail "wrapper did not keep a client attached before Ctrl+C"
 
-# Send the same interrupt that the attached Codex terminal receives. No input
-# acknowledgement is written after this point.
-tmux_cmd send-keys -t "$MAIN_PANE_ID" C-c
+# Attach another client to the same HUD session. Session-scoped teardown must
+# return every client for this HUD session while leaving the sentinel intact.
+DECOY_SESSION="$SESSION_NAME"
+script -qefc \
+  "env TERM=xterm-256color TMUX= TMUX_TMPDIR=$(printf '%q' "$TMUX_TMPDIR") tmux -f /dev/null attach-session -t $(printf '%q' "$DECOY_SESSION")" \
+  "$DECOY_PTY_LOG" <&4 &
+DECOY_PID=$!
+for _ in $(seq 1 240); do
+  if [[ "$(tmux_cmd list-clients -F '#{session_name}' 2>/dev/null |
+    grep -Fc "$DECOY_SESSION" || true)" -ge 2 ]]; then
+    break
+  fi
+  sleep 0.05
+done
+[[ "$(tmux_cmd list-clients -F '#{session_name}' 2>/dev/null |
+  grep -Fc "$DECOY_SESSION" || true)" -ge 2 ]] ||
+  fail "decoy tmux client did not attach before Ctrl+C"
+
+# Send Ctrl+C through the attached terminal's input path. This models the
+# user's terminal keypress, rather than bypassing the client with tmux
+# send-keys directly to the main pane.
+printf '\003' >&3
 
 for _ in $(seq 1 240); do
   if ! kill -0 "$WRAPPER_PID" 2>/dev/null; then

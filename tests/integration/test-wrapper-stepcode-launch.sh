@@ -110,6 +110,7 @@ assert_contains() {
 assert_contains "$launch_line" "CODEX_HOME='$MANAGED_CODEX_HOME' CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH' '$FAKE_BIN_DIR/stepcode' 'codex'" "StepCode launcher"
 assert_contains "$launch_line" "CODEX_HOME='$MANAGED_CODEX_HOME'" "main-pane managed CODEX_HOME"
 assert_contains "$launch_line" "CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH'" "main-pane stable sessions path"
+assert_contains "$launch_line" "tmux detach-client -s '" "session-scoped exit teardown"
 assert_contains "$hud_line" "CODEX_HOME='$MANAGED_CODEX_HOME'" "HUD-pane managed CODEX_HOME"
 assert_contains "$hud_line" "CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH'" "HUD-pane stable sessions path"
 

@@ -24,8 +24,11 @@ UNINSTALL_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-uninstall"
 UPDATE_HELPER_PATH="$SCRIPT_DIR/bin/codex-hud-update.mjs"
 BACKUP_FILE="$HOME/.codex-hud-backup-aliases"
 MARKER="# codex-hud alias"
+STEPCODE_MARKER="# codex-hud stepcode entry"
 SOURCE_MARKER="# codex-hud: load bashrc"
 MODE="install"
+MODE_EXPLICIT=""
+ENABLE_STEPCODE="0"
 UPGRADE_TRANSACTION_ROOT=""
 UPGRADE_WORKTREE=""
 UPGRADE_BACKUP_ROOT=""
@@ -53,10 +56,10 @@ show_help() {
 Codex HUD installer / sync / upgrade utility
 
 Usage:
-  ./install.sh              Install or refresh codex-hud in the current checkout
-  ./install.sh --sync       Rebuild and refresh aliases for the current checkout
-  ./install.sh --upgrade    Build the fetched update in staging, then fast-forward and sync
-  ./install.sh --help       Show this help message
+  ./install.sh [--install] [--enable-stepcode]  Install or refresh codex-hud
+  ./install.sh --sync [--enable-stepcode]       Rebuild and refresh managed entries
+  ./install.sh --upgrade [--enable-stepcode]    Upgrade, rebuild, and refresh entries
+  ./install.sh --help                           Show this help message
 
 Quick command wrappers:
   ./bin/codex-hud-install
@@ -66,6 +69,9 @@ Quick command wrappers:
 
 Launch aliases (bash/zsh):
   codex, cx, codex-resume
+
+Optional StepCode entry:
+  --enable-stepcode  Explicitly install or update the scx shell function
 EOF
 }
 
@@ -276,6 +282,29 @@ backup_existing_aliases() {
     fi
 }
 
+backup_existing_stepcode_alias() {
+    local rc_file="$1"
+
+    if [[ ! -f "$rc_file" ]]; then
+        return 0
+    fi
+
+    local existing_aliases
+    existing_aliases=$(grep "^alias scx[= ]" "$rc_file" 2>/dev/null | grep -v "$STEPCODE_MARKER" || true)
+    if [[ -z "$existing_aliases" ]]; then
+        return 0
+    fi
+
+    warn "Found existing scx alias entries in $rc_file"
+    echo "$existing_aliases" >> "$BACKUP_FILE"
+    info "Backed up to $BACKUP_FILE"
+
+    local temp_file
+    temp_file=$(mktemp)
+    grep -Ev "^alias scx[= ]" "$rc_file" > "$temp_file" || true
+    mv "$temp_file" "$rc_file"
+}
+
 write_aliases() {
     local rc_file="$1"
     local shell_name="$2"
@@ -298,6 +327,46 @@ write_aliases() {
     echo "alias codex-hud-sync='$SYNC_CMD_PATH'  $MARKER" >> "$rc_file"
     echo "alias codex-hud-upgrade='$UPGRADE_CMD_PATH'  $MARKER" >> "$rc_file"
     echo "alias codex-hud-uninstall='$UNINSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
+}
+
+write_stepcode_entry() {
+    local rc_file="$1"
+    local shell_name="$2"
+
+    if [[ "$shell_name" == "fish" ]]; then
+        echo "functions -e scx 2>/dev/null  $STEPCODE_MARKER" >> "$rc_file"
+        echo "function scx  $STEPCODE_MARKER" >> "$rc_file"
+        echo "  '$WRAPPER_PATH' --stepcode --new-session --sandbox danger-full-access --ask-for-approval never -c 'model_reasoning_effort=\"high\"' -c model_auto_compact_token_limit=200000 -c model_providers.stepcode-api.stream_idle_timeout_ms=600000 \$argv  $STEPCODE_MARKER" >> "$rc_file"
+        echo "end  $STEPCODE_MARKER" >> "$rc_file"
+        return 0
+    fi
+
+    local wrapper_quoted
+    printf -v wrapper_quoted '%q' "$WRAPPER_PATH"
+    echo "unalias scx 2>/dev/null || true  $STEPCODE_MARKER" >> "$rc_file"
+    printf '%s\n' \
+        "scx() { $wrapper_quoted --stepcode --new-session --sandbox danger-full-access --ask-for-approval never -c 'model_reasoning_effort=\"high\"' -c model_auto_compact_token_limit=200000 -c model_providers.stepcode-api.stream_idle_timeout_ms=600000 \"\$@\"; }  $STEPCODE_MARKER" \
+        >> "$rc_file"
+}
+
+configure_stepcode_entry() {
+    local rc_file="$1"
+    local shell_name="$2"
+
+    if [[ ! -f "$rc_file" ]]; then
+        touch "$rc_file"
+    fi
+
+    backup_existing_stepcode_alias "$rc_file"
+
+    local temp_file
+    temp_file=$(mktemp)
+    grep -v "$STEPCODE_MARKER" "$rc_file" > "$temp_file" || true
+    mv "$temp_file" "$rc_file"
+
+    echo "" >> "$rc_file"
+    write_stepcode_entry "$rc_file" "$shell_name"
+    info "Configured optional scx entry in $rc_file"
 }
 
 # Add our alias to the RC file
@@ -566,6 +635,9 @@ main() {
     
     step "Configuring aliases in $bash_rc..."
     add_alias "$bash_rc" "bash"
+    if [[ "$ENABLE_STEPCODE" == "1" ]]; then
+        configure_stepcode_entry "$bash_rc" "bash"
+    fi
 
     step "Ensuring bash login shells load $bash_rc..."
     ensure_bashrc_sourced
@@ -573,16 +645,25 @@ main() {
     if [[ -f "$bash_profile" ]]; then
         step "Configuring aliases in $bash_profile..."
         add_alias "$bash_profile" "bash"
+        if [[ "$ENABLE_STEPCODE" == "1" ]]; then
+            configure_stepcode_entry "$bash_profile" "bash"
+        fi
     fi
     
     step "Configuring aliases in $zsh_rc..."
     add_alias "$zsh_rc" "zsh"
+    if [[ "$ENABLE_STEPCODE" == "1" ]]; then
+        configure_stepcode_entry "$zsh_rc" "zsh"
+    fi
 
     if [[ "$shell_name" == "fish" ]]; then
         local fish_rc="$HOME/.config/fish/config.fish"
         mkdir -p "$(dirname "$fish_rc")"
         step "Configuring aliases in $fish_rc..."
         add_alias "$fish_rc" "fish"
+        if [[ "$ENABLE_STEPCODE" == "1" ]]; then
+            configure_stepcode_entry "$fish_rc" "fish"
+        fi
     fi
     
     case "$MODE" in
@@ -604,6 +685,9 @@ main() {
     echo ""
     echo "Then just type ${GREEN}codex${NC} or ${GREEN}cx${NC} to start Codex with the HUD!"
     echo "Or use ${GREEN}codex-resume${NC} to resume with the HUD wrapper."
+    if [[ "$ENABLE_STEPCODE" == "1" ]]; then
+        echo "StepCode entry enabled: type ${GREEN}scx${NC} to start StepCode Codex with the HUD."
+    fi
     echo "Management commands: ${GREEN}codex-hud-sync${NC}, ${GREEN}codex-hud-upgrade${NC}, ${GREEN}codex-hud-uninstall${NC}"
     echo ""
     echo "Configuration options:"
@@ -613,28 +697,30 @@ main() {
     echo "To uninstall from the repo root: ${YELLOW}./bin/codex-hud-uninstall${NC}"
 }
 
-# Parse flags first
-case "${1:-}" in
-    --help|-h)
-        show_help
-        exit 0
-        ;;
-    --sync)
-        MODE="sync"
-        shift
-        ;;
-    --upgrade)
-        MODE="upgrade"
-        shift
-        ;;
-    --install|"")
-        MODE="install"
-        [[ "${1:-}" == "--install" ]] && shift
-        ;;
-    *)
-        error "Unknown option: $1"
-        ;;
-esac
+# Parse flags
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        --install|--sync|--upgrade)
+            requested_mode="${1#--}"
+            if [[ -n "$MODE_EXPLICIT" && "$MODE_EXPLICIT" != "$requested_mode" ]]; then
+                error "Conflicting install modes: --$MODE_EXPLICIT and $1"
+            fi
+            MODE="$requested_mode"
+            MODE_EXPLICIT="$requested_mode"
+            ;;
+        --enable-stepcode)
+            ENABLE_STEPCODE="1"
+            ;;
+        *)
+            error "Unknown option: $1"
+            ;;
+    esac
+    shift
+done
 
 # Run main
-main "$@"
+main

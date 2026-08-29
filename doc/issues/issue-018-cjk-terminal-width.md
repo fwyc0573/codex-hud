@@ -3,12 +3,13 @@
 | Date       | Summary of Changes |
 | ---------- | ------------------ |
 | 2026-08-29 | Added the issue #18 root-cause analysis, implementation details, and verification evidence. |
+| 2026-08-29 | Pointed the status metadata at the published PR branch and PR #19. |
 
 # Issue 018: CJK Project Names Wrap the HUD
 
 ## Status
 
-- **State:** Fixed on `fix/issue-18-cjk-terminal-width`
+- **State:** Fixed in PR #19 on `fix/issue-18-cjk-terminal-width-pr`
 - **Reported issue:** https://github.com/fwyc0573/codex-hud/issues/18
 - **Affected path:** `src/render/colors.ts` and the renderer callers that consume its width helpers
 - **User-visible impact:** A project name containing CJK characters can make a HUD row exceed the tmux pane, wrap onto a second physical row, and leave an old title fragment after refresh.

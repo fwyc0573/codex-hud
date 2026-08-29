@@ -35,6 +35,8 @@ assert.equal(stripAnsi('\x1b(Ba'), 'a', 'ESC intermediate/final sequences must b
 assert.equal(visualLength('\x1b(Ba'), 1);
 assert.equal(stripAnsi('\x85a'), 'a', 'a single-byte C1 control must not consume the next character');
 assert.equal(visualLength('\x85a'), 1);
+assert.equal(stripAnsi('\x1b中a'), '中a', 'an invalid ESC continuation must preserve following Unicode text');
+assert.equal(visualLength('\x1b中a'), 3);
 
 // Padding and both truncation paths share the same column budget.
 const padded = padEnd('中文', 6);
@@ -48,6 +50,10 @@ const truncatedColored = truncateAnsi(colors.yellow('中文项目'), 5);
 assert.equal(plain(truncatedColored), '中文…');
 assert.equal(visualLength(truncatedColored), 5);
 assert.ok(truncatedColored.endsWith('\x1b[0m'), 'truncated styled text closes its active SGR');
+
+const truncatedColonSgr = truncateAnsi('\x1b[38:5:123mabcdef', 3);
+assert.equal(plain(truncatedColonSgr), 'ab…');
+assert.ok(truncatedColonSgr.endsWith('\x1b[0m'), 'truncated colon-form SGR closes its active style');
 
 const truncatedGrapheme = truncateAnsi(colors.cyan('👨‍👩‍👧‍👦abc'), 3);
 assert.equal(plain(truncatedGrapheme), '👨‍👩‍👧‍👦…');
@@ -70,6 +76,15 @@ assert.equal(plain(truncateAnsi(splitFamily + 'abc', 3)), '👨‍👩‍👧‍
 const splitCombining = `e${colors.yellow('')}\u0301xyz`;
 assert.equal(visualLength(splitCombining), 4, 'ANSI controls between a base and combining mark must preserve width');
 assert.equal(plain(truncateAnsi(splitCombining, 2)), 'e\u0301…');
+
+const splitRegionalIndicatorPair = `🇨${colors.yellow('')}🇳🇨🇳`;
+assert.equal(stripAnsi(splitRegionalIndicatorPair), '🇨🇳🇨🇳');
+assert.equal(
+  visualLength(splitRegionalIndicatorPair),
+  4,
+  'ANSI controls must not change regional-indicator pairing across adjacent flags',
+);
+assert.equal(plain(truncateAnsi(`${splitRegionalIndicatorPair}x`, 3)), '🇨🇳…');
 
 // Project-line truncation must use physical columns, not JavaScript string length.
 const projectData = {

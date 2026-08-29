@@ -181,7 +181,9 @@ function ansiSequenceEnd(text: string, start: number): number | null {
         index += 1;
         continue;
       }
-      return index + 1;
+      // An invalid continuation terminates the ESC control itself. Preserve
+      // the following visible code point for the normal text tokenizer.
+      return start + 1;
     }
     return text.length;
   }
@@ -193,49 +195,18 @@ function ansiSequenceEnd(text: string, start: number): number | null {
   return null;
 }
 
-function appendGraphemeTokens(tokens: TerminalToken[], text: string): void {
-  for (const segment of graphemeSegmenter.segment(text)) {
-    tokens.push({ kind: 'text', value: segment.segment, width: graphemeWidth(segment.segment) });
-  }
-}
+type RawTerminalToken =
+  | { kind: 'ansi'; value: string }
+  | { kind: 'text'; value: string };
 
-function mergeGraphemeTokensAcrossAnsi(tokens: TerminalToken[]): TerminalToken[] {
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token?.kind !== 'text') {
-      continue;
-    }
+type GraphemeSpan = {
+  start: number;
+  end: number;
+  width: number;
+};
 
-    let cluster = token.value;
-    let nextIndex = index + 1;
-    while (nextIndex < tokens.length) {
-      let textIndex = nextIndex;
-      while (textIndex < tokens.length && tokens[textIndex]?.kind === 'ansi') {
-        textIndex += 1;
-      }
-      const nextToken = tokens[textIndex];
-      if (nextToken?.kind !== 'text') {
-        break;
-      }
-
-      const candidate = cluster + nextToken.value;
-      if ([...graphemeSegmenter.segment(candidate)].length !== 1) {
-        break;
-      }
-
-      cluster = candidate;
-      token.width = graphemeWidth(cluster);
-      nextToken.width = 0;
-      nextIndex = textIndex + 1;
-    }
-
-    index = Math.max(index, nextIndex - 1);
-  }
-  return tokens;
-}
-
-function tokenizeTerminalText(text: string): TerminalToken[] {
-  const tokens: TerminalToken[] = [];
+function parseTerminalTokens(text: string): RawTerminalToken[] {
+  const tokens: RawTerminalToken[] = [];
   let textStart = 0;
   let index = 0;
 
@@ -246,7 +217,7 @@ function tokenizeTerminalText(text: string): TerminalToken[] {
       continue;
     }
     if (textStart < index) {
-      appendGraphemeTokens(tokens, text.slice(textStart, index));
+      tokens.push({ kind: 'text', value: text.slice(textStart, index) });
     }
     tokens.push({ kind: 'ansi', value: text.slice(index, end) });
     index = end;
@@ -254,9 +225,69 @@ function tokenizeTerminalText(text: string): TerminalToken[] {
   }
 
   if (textStart < text.length) {
-    appendGraphemeTokens(tokens, text.slice(textStart));
+    tokens.push({ kind: 'text', value: text.slice(textStart) });
   }
-  return mergeGraphemeTokensAcrossAnsi(tokens);
+  return tokens;
+}
+
+function tokenizeTerminalText(text: string): TerminalToken[] {
+  const rawTokens = parseTerminalTokens(text);
+  const visibleText = rawTokens
+    .filter((token): token is Extract<RawTerminalToken, { kind: 'text' }> => token.kind === 'text')
+    .map((token) => token.value)
+    .join('');
+  const graphemeSpans: GraphemeSpan[] = [];
+  for (const segment of graphemeSegmenter.segment(visibleText)) {
+    graphemeSpans.push({
+      start: segment.index,
+      end: segment.index + segment.segment.length,
+      width: graphemeWidth(segment.segment),
+    });
+  }
+
+  const tokens: TerminalToken[] = [];
+  const emittedSpans = new Set<number>();
+  let visibleOffset = 0;
+  let spanIndex = 0;
+
+  for (const token of rawTokens) {
+    if (token.kind === 'ansi') {
+      tokens.push(token);
+      continue;
+    }
+
+    const chunkStart = visibleOffset;
+    const chunkEnd = chunkStart + token.value.length;
+    let cursor = chunkStart;
+    while (cursor < chunkEnd) {
+      while (spanIndex < graphemeSpans.length && cursor >= (graphemeSpans[spanIndex]?.end ?? 0)) {
+        spanIndex += 1;
+      }
+      const span = graphemeSpans[spanIndex];
+      if (!span || span.start > cursor) {
+        throw new Error(`Unable to map visible text offset ${cursor} to a grapheme span`);
+      }
+
+      const pieceEnd = Math.min(chunkEnd, span.end);
+      if (pieceEnd <= cursor) {
+        throw new Error(`Invalid grapheme span boundary at visible text offset ${cursor}`);
+      }
+
+      tokens.push({
+        kind: 'text',
+        value: visibleText.slice(cursor, pieceEnd),
+        width: emittedSpans.has(spanIndex) ? 0 : span.width,
+      });
+      emittedSpans.add(spanIndex);
+      cursor = pieceEnd;
+    }
+    visibleOffset = chunkEnd;
+  }
+
+  if (visibleOffset !== visibleText.length) {
+    throw new Error('Visible text tokenization did not consume the complete input');
+  }
+  return tokens;
 }
 
 function terminalWidth(text: string): number {
@@ -294,7 +325,7 @@ function fitEllipsis(ellipsis: string, maxWidth: number): { value: string; width
 }
 
 function isSgrSequence(sequence: string): boolean {
-  return /^(?:\x1b\[|\x9b)[0-9;]*m$/u.test(sequence);
+  return /^(?:\x1b\[|\x9b)[0-9:;?]*m$/u.test(sequence);
 }
 
 function updateSgrState(sequence: string, active: boolean): boolean {
@@ -302,7 +333,7 @@ function updateSgrState(sequence: string, active: boolean): boolean {
     return active;
   }
   const body = sequence.startsWith('\x9b') ? sequence.slice(1, -1) : sequence.slice(2, -1);
-  const parameters = body === '' ? [0] : body.split(';').map((value) => Number(value));
+  const parameters = body === '' ? [0] : body.split(/[;:]/u).map((value) => Number(value));
   let next = active;
   for (const parameter of parameters) {
     if (parameter === 0) {

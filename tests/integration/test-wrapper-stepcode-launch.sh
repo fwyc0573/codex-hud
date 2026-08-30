@@ -13,7 +13,7 @@ ORDINARY_CODEX_HOME="$TEST_ROOT/ordinary-codex-home"
 ORDINARY_SESSIONS_PATH="$TEST_ROOT/ordinary-sessions"
 MANAGED_CODEX_HOME="$HOME_DIR/.stepcode/codex"
 MANAGED_SESSIONS_PATH="$HOME_DIR/.codex/sessions"
-MANAGED_SQLITE_HOME="$MANAGED_CODEX_HOME/.codex-hud-sqlite"
+MANAGED_SQLITE_ROOT="$MANAGED_CODEX_HOME/.codex-hud-sqlite"
 
 mkdir -p "$FAKE_BIN_DIR" "$HOME_DIR" "$ORDINARY_CODEX_HOME" "$ORDINARY_SESSIONS_PATH"
 
@@ -108,14 +108,31 @@ assert_contains() {
   fi
 }
 
-assert_contains "$launch_line" "CODEX_HOME='$MANAGED_CODEX_HOME' CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH' CODEX_SQLITE_HOME='$MANAGED_SQLITE_HOME' '$FAKE_BIN_DIR/stepcode' 'codex'" "StepCode launcher"
+extract_sqlite_home() {
+  local value="$1"
+  local suffix="${value#*CODEX_SQLITE_HOME=\'}"
+  if [[ "$suffix" == "$value" ]]; then
+    echo "StepCode launch command is missing CODEX_SQLITE_HOME." >&2
+    exit 1
+  fi
+  printf '%s' "${suffix%%\'*}"
+}
+
+managed_sqlite_home="$(extract_sqlite_home "$launch_line")"
+if [[ "$managed_sqlite_home" != "$MANAGED_SQLITE_ROOT/"* ]]; then
+  echo "StepCode sqlite home must be launch-scoped below $MANAGED_SQLITE_ROOT: $managed_sqlite_home" >&2
+  exit 1
+fi
+
+assert_contains "$launch_line" "CODEX_HOME='$MANAGED_CODEX_HOME' CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH'" "StepCode launcher"
+assert_contains "$launch_line" "CODEX_SQLITE_HOME='$managed_sqlite_home' '$FAKE_BIN_DIR/stepcode' 'codex'" "StepCode launcher"
 assert_contains "$launch_line" "CODEX_HOME='$MANAGED_CODEX_HOME'" "main-pane managed CODEX_HOME"
 assert_contains "$launch_line" "CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH'" "main-pane stable sessions path"
-assert_contains "$launch_line" "CODEX_SQLITE_HOME='$MANAGED_SQLITE_HOME'" "main-pane isolated sqlite home"
+assert_contains "$launch_line" "CODEX_SQLITE_HOME='$managed_sqlite_home'" "main-pane isolated sqlite home"
 assert_contains "$launch_line" "tmux detach-client -s '" "session-scoped exit teardown"
 assert_contains "$hud_line" "CODEX_HOME='$MANAGED_CODEX_HOME'" "HUD-pane managed CODEX_HOME"
 assert_contains "$hud_line" "CODEX_SESSIONS_PATH='$MANAGED_SESSIONS_PATH'" "HUD-pane stable sessions path"
-assert_contains "$hud_line" "CODEX_SQLITE_HOME='$MANAGED_SQLITE_HOME'" "HUD-pane isolated sqlite home"
+assert_contains "$hud_line" "CODEX_SQLITE_HOME='$managed_sqlite_home'" "HUD-pane isolated sqlite home"
 
 for argument in \
   "'--sandbox' 'danger-full-access'" \

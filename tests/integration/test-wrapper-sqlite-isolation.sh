@@ -7,10 +7,12 @@ FAKE_TMUX_DIR="$SCRIPT_DIR/fake-tmux"
 TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-sqlite-isolation-XXXXXX)"
 FAKE_BIN_DIR="$TEST_ROOT/fake-bin"
 HOME_DIR="$TEST_ROOT/home"
-LOG_FILE="$TEST_ROOT/tmux.log"
-OUTPUT_FILE="$TEST_ROOT/wrapper.log"
+LOG_FILE_1="$TEST_ROOT/tmux-1.log"
+LOG_FILE_2="$TEST_ROOT/tmux-2.log"
+OUTPUT_FILE_1="$TEST_ROOT/wrapper-1.log"
+OUTPUT_FILE_2="$TEST_ROOT/wrapper-2.log"
 MANAGED_CODEX_HOME="$HOME_DIR/.stepcode/codex"
-SQLITE_HOME="$MANAGED_CODEX_HOME/.codex-hud-sqlite"
+SQLITE_ROOT="$MANAGED_CODEX_HOME/.codex-hud-sqlite"
 
 mkdir -p "$FAKE_BIN_DIR" "$MANAGED_CODEX_HOME"
 touch \
@@ -52,7 +54,6 @@ export CODEX_HUD_UPDATE_CHECK=0
 export CODEX_HUD_HEIGHT=5
 export CODEX_HUD_HEIGHT_AUTO=0
 export PATH="$FAKE_BIN_DIR:$FAKE_TMUX_DIR:$PATH"
-export TMUX_LOG_FILE="$LOG_FILE"
 export TMUX_MAIN_PANE_ID="%1"
 export TMUX_PANE_ID="%2"
 export TMUX_PANES=$'%1\n%2'
@@ -65,21 +66,24 @@ export TMUX_AUTO=0
 export TMUX_PANE_WIDTH=120
 export TMUX_PANE_HEIGHT=5
 
-"$ROOT_DIR/bin/codex-hud" \
-  --stepcode \
-  --new-session \
-  --sandbox danger-full-access \
-  --ask-for-approval never \
-  >"$OUTPUT_FILE" 2>&1
+run_wrapper() {
+  local log_file="$1"
+  local output_file="$2"
+  TMUX_LOG_FILE="$log_file" "$ROOT_DIR/bin/codex-hud" \
+    --stepcode \
+    --new-session \
+    --sandbox danger-full-access \
+    --ask-for-approval never \
+    >"$output_file" 2>&1
+}
 
-launch_line="$(grep -m1 '^respawn-pane ' "$LOG_FILE" || true)"
-hud_line="$(grep -m1 '^split-window ' "$LOG_FILE" || true)"
+run_wrapper "$LOG_FILE_1" "$OUTPUT_FILE_1"
+run_wrapper "$LOG_FILE_2" "$OUTPUT_FILE_2"
 
-if [[ -z "$launch_line" || -z "$hud_line" ]]; then
-  echo "Expected StepCode and HUD pane launch commands." >&2
-  cat "$LOG_FILE" >&2
-  exit 1
-fi
+launch_line_1="$(grep -m1 '^respawn-pane ' "$LOG_FILE_1" || true)"
+launch_line_2="$(grep -m1 '^respawn-pane ' "$LOG_FILE_2" || true)"
+hud_line_1="$(grep -m1 '^split-window ' "$LOG_FILE_1" || true)"
+hud_line_2="$(grep -m1 '^split-window ' "$LOG_FILE_2" || true)"
 
 assert_contains() {
   local value="$1"
@@ -92,24 +96,55 @@ assert_contains() {
   fi
 }
 
-assert_contains "$launch_line" "CODEX_SQLITE_HOME='$SQLITE_HOME'" "StepCode sqlite home"
-assert_contains "$hud_line" "CODEX_SQLITE_HOME='$SQLITE_HOME'" "HUD sqlite home"
-
-for database in state_5.sqlite goals_1.sqlite memories_1.sqlite; do
-  link="$SQLITE_HOME/$database"
-  if [[ ! -L "$link" ]]; then
-    echo "Expected $link to be a symlink to the existing state database." >&2
+extract_sqlite_home() {
+  local launch_line="$1"
+  local suffix="${launch_line#*CODEX_SQLITE_HOME=\'}"
+  if [[ "$suffix" == "$launch_line" ]]; then
+    echo "Launch command is missing CODEX_SQLITE_HOME: $launch_line" >&2
     exit 1
   fi
-  if [[ "$(readlink -f "$link")" != "$MANAGED_CODEX_HOME/$database" ]]; then
-    echo "Unexpected target for $link: $(readlink "$link")" >&2
+  printf '%s' "${suffix%%\'*}"
+}
+
+for line in "$launch_line_1" "$launch_line_2" "$hud_line_1" "$hud_line_2"; do
+  if [[ -z "$line" ]]; then
+    echo "Expected StepCode and HUD pane launch commands for both launches." >&2
     exit 1
   fi
 done
 
-if [[ -L "$SQLITE_HOME/logs_2.sqlite" ]]; then
-  echo "The large shared logs database must stay out of the new sqlite home." >&2
+sqlite_home_1="$(extract_sqlite_home "$launch_line_1")"
+sqlite_home_2="$(extract_sqlite_home "$launch_line_2")"
+
+if [[ "$sqlite_home_1" == "$sqlite_home_2" ]]; then
+  echo "Parallel HUD launches must not share one SQLite home: $sqlite_home_1" >&2
   exit 1
 fi
+
+for sqlite_home in "$sqlite_home_1" "$sqlite_home_2"; do
+  if [[ "$sqlite_home" != "$SQLITE_ROOT/"* ]]; then
+    echo "Launch SQLite home must be scoped below $SQLITE_ROOT: $sqlite_home" >&2
+    exit 1
+  fi
+  for database in state_5.sqlite goals_1.sqlite memories_1.sqlite; do
+    link="$sqlite_home/$database"
+    if [[ ! -L "$link" ]]; then
+      echo "Expected $link to be a symlink to the existing state database." >&2
+      exit 1
+    fi
+    if [[ "$(readlink -f "$link")" != "$MANAGED_CODEX_HOME/$database" ]]; then
+      echo "Unexpected target for $link: $(readlink "$link")" >&2
+      exit 1
+    fi
+  done
+
+  if [[ -L "$sqlite_home/logs_2.sqlite" ]]; then
+    echo "The shared logs database must stay out of $sqlite_home." >&2
+    exit 1
+  fi
+done
+
+assert_contains "$hud_line_1" "CODEX_SQLITE_HOME='$sqlite_home_1'" "First HUD sqlite home"
+assert_contains "$hud_line_2" "CODEX_SQLITE_HOME='$sqlite_home_2'" "Second HUD sqlite home"
 
 echo "test-wrapper-sqlite-isolation: PASS"

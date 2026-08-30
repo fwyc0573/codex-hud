@@ -344,7 +344,7 @@ resolve_sqlite_home() {
         error "HOME is required to derive the Codex SQLite home."
     fi
 
-    CODEX_SQLITE_HOME_OVERRIDE="${CODEX_SQLITE_HOME_SOURCE%/}/.codex-hud-sqlite"
+    CODEX_SQLITE_HOME_OVERRIDE="${CODEX_SQLITE_HOME_SOURCE%/}/.codex-hud-sqlite/$SESSION_NAME"
 }
 
 ensure_sqlite_state_link() {
@@ -370,8 +370,7 @@ ensure_sqlite_state_link() {
     fi
 
     if ! ln -s "$source_path" "$link_path"; then
-        # Two new launches can prepare the same managed home concurrently.
-        # Accept the winner only when it created the exact link we require.
+        # Accept an identical link created between the preflight check and ln.
         if [[ -L "$link_path" ]] && [[ "$(readlink "$link_path" 2>/dev/null || true)" == "$source_path" ]]; then
             return 0
         fi
@@ -394,7 +393,7 @@ prepare_sqlite_home() {
     fi
 
     # Keep thread, goal, and memory metadata shared with the existing Codex
-    # home while giving each HUD-managed runtime a fresh, bounded log database.
+    # home while giving each HUD launch its own log database.
     # SQLite resolves sidecar WAL/SHM files through these links to the source
     # database, so active sessions retain their existing state semantics.
     ensure_sqlite_state_link "state_5.sqlite"

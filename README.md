@@ -16,6 +16,7 @@ Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex)
 
 ## News
 
+- **[2026-08-30]** Improved SQLite concurrency across multiple sessions, making new sessions load up to 100x faster.
 - **[2026-08-15]** Added automatic detection of OpenAI upstream "capacity exceeded" blocks, with automatic "continue" handling. See `cx-continue/README.md` for usage.
 - **[2026-07-20]** Released the first stable version, v1.0, with full support for macOS and Linux.
 

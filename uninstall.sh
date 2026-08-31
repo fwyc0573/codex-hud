@@ -18,6 +18,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_FILE="$HOME/.codex-hud-backup-aliases"
 MARKER="# codex-hud alias"
+STEPCODE_MARKER="# codex-hud stepcode entry"
 UPDATE_HELPER_PATH="$SCRIPT_DIR/bin/codex-hud-update.mjs"
 
 # Print functions
@@ -97,7 +98,7 @@ remove_alias() {
         return 0
     fi
     
-    if ! grep -q "$MARKER" "$rc_file" 2>/dev/null; then
+    if ! grep -Eq "$MARKER|$STEPCODE_MARKER" "$rc_file" 2>/dev/null; then
         info "No codex-hud alias found in $rc_file"
         return 0
     fi
@@ -105,7 +106,7 @@ remove_alias() {
     # Remove lines containing our marker
     local temp_file
     temp_file=$(mktemp)
-    grep -v "$MARKER" "$rc_file" > "$temp_file" || true
+    grep -Ev "$MARKER|$STEPCODE_MARKER" "$rc_file" > "$temp_file" || true
     mv "$temp_file" "$rc_file"
     
     info "Removed codex-hud alias from $rc_file"
@@ -173,7 +174,7 @@ restore_backup() {
 cleanup_fish() {
     local fish_config="$HOME/.config/fish/config.fish"
     if [[ -f "$fish_config" ]]; then
-        if grep -q "$MARKER" "$fish_config" 2>/dev/null; then
+        if grep -Eq "$MARKER|$STEPCODE_MARKER" "$fish_config" 2>/dev/null; then
             step "Cleaning up fish configuration..."
             remove_alias "$fish_config"
         fi
@@ -224,7 +225,7 @@ main() {
     local other_files=("$bash_rc" "$bash_profile" "$zsh_rc")
     for file in "${other_files[@]}"; do
         if [[ "$file" != "$rc_file" ]] && [[ -f "$file" ]]; then
-            if grep -q "$MARKER" "$file" 2>/dev/null; then
+            if grep -Eq "$MARKER|$STEPCODE_MARKER" "$file" 2>/dev/null; then
                 step "Also removing from $file..."
                 remove_alias "$file"
             fi

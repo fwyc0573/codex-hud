@@ -42,6 +42,9 @@ LAUNCH_PROFILE_SESSION_TAG=""
 CODEX_CLI_COMMAND=()
 CODEX_HOME_OVERRIDE=""
 CODEX_SESSIONS_OVERRIDE=""
+CODEX_SQLITE_HOME_OVERRIDE=""
+CODEX_SQLITE_HOME_SOURCE=""
+CODEX_SQLITE_HOME_EXPLICIT="0"
 UPDATE_HELPER_PATH="$SCRIPT_DIR/codex-hud-update.mjs"
 UPDATE_UPGRADE_PATH="$SCRIPT_DIR/codex-hud-upgrade"
 FORCE_ATTACH="0"
@@ -324,6 +327,80 @@ prepare_launch_profile_home() {
     fi
 }
 
+resolve_sqlite_home() {
+    if [[ -n "${CODEX_SQLITE_HOME:-}" ]]; then
+        CODEX_SQLITE_HOME_OVERRIDE="$CODEX_SQLITE_HOME"
+        CODEX_SQLITE_HOME_EXPLICIT="1"
+        return 0
+    fi
+
+    if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
+        CODEX_SQLITE_HOME_SOURCE="$CODEX_HOME_OVERRIDE"
+    elif [[ -n "${CODEX_HOME:-}" ]]; then
+        CODEX_SQLITE_HOME_SOURCE="$CODEX_HOME"
+    elif [[ -n "${HOME:-}" ]]; then
+        CODEX_SQLITE_HOME_SOURCE="${HOME%/}/.codex"
+    else
+        error "HOME is required to derive the Codex SQLite home."
+    fi
+
+    CODEX_SQLITE_HOME_OVERRIDE="${CODEX_SQLITE_HOME_SOURCE%/}/.codex-hud-sqlite/$SESSION_NAME"
+}
+
+ensure_sqlite_state_link() {
+    local database="$1"
+    local source_path="${CODEX_SQLITE_HOME_SOURCE%/}/$database"
+    local link_path="${CODEX_SQLITE_HOME_OVERRIDE%/}/$database"
+
+    if [[ ! -f "$source_path" ]]; then
+        return 0
+    fi
+
+    if [[ -L "$link_path" ]]; then
+        local target
+        target=$(readlink "$link_path" 2>/dev/null || true)
+        if [[ "$target" == "$source_path" ]]; then
+            return 0
+        fi
+        error "Conflicting Codex SQLite link: $link_path points to ${target:-<unreadable>}, expected $source_path."
+    fi
+
+    if [[ -e "$link_path" ]]; then
+        error "Refusing to replace an existing Codex SQLite file: $link_path"
+    fi
+
+    if ! ln -s "$source_path" "$link_path"; then
+        # Accept an identical link created between the preflight check and ln.
+        if [[ -L "$link_path" ]] && [[ "$(readlink "$link_path" 2>/dev/null || true)" == "$source_path" ]]; then
+            return 0
+        fi
+        error "Unable to link the existing Codex SQLite database: $link_path"
+    fi
+}
+
+prepare_sqlite_home() {
+    resolve_sqlite_home
+
+    if [[ -z "$CODEX_SQLITE_HOME_OVERRIDE" ]]; then
+        error "Codex SQLite home resolved to an empty path."
+    fi
+    if ! mkdir -p "$CODEX_SQLITE_HOME_OVERRIDE"; then
+        error "Unable to create the Codex SQLite home: $CODEX_SQLITE_HOME_OVERRIDE"
+    fi
+
+    if [[ "$CODEX_SQLITE_HOME_EXPLICIT" == "1" ]]; then
+        return 0
+    fi
+
+    # Keep thread, goal, and memory metadata shared with the existing Codex
+    # home while giving each HUD launch its own log database.
+    # SQLite resolves sidecar WAL/SHM files through these links to the source
+    # database, so active sessions retain their existing state semantics.
+    ensure_sqlite_state_link "state_5.sqlite"
+    ensure_sqlite_state_link "goals_1.sqlite"
+    ensure_sqlite_state_link "memories_1.sqlite"
+}
+
 launch_environment_prefix() {
     local prefix=""
     if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
@@ -331,6 +408,9 @@ launch_environment_prefix() {
     fi
     if [[ -n "$CODEX_SESSIONS_OVERRIDE" ]]; then
         prefix="${prefix}CODEX_SESSIONS_PATH=$(shell_quote "$CODEX_SESSIONS_OVERRIDE") "
+    fi
+    if [[ -n "$CODEX_SQLITE_HOME_OVERRIDE" ]]; then
+        prefix="${prefix}CODEX_SQLITE_HOME=$(shell_quote "$CODEX_SQLITE_HOME_OVERRIDE") "
     fi
     printf "%s" "$prefix"
 }
@@ -715,6 +795,7 @@ create_session() {
     term_width=$(tput cols 2>/dev/null || echo 80)
     resolve_hud_height "$term_height"
     prepare_launch_profile_home
+    prepare_sqlite_home
     
     # Build the launch command string from the resolved profile vector.
     # Quote every executable, subcommand, and forwarded argument before

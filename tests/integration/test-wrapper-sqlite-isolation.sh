@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify that concurrent HUD launches receive independent SQLite log homes
-# while persistent Codex metadata remains reachable from the stable profile.
+# Verify that SQLite isolation is opt-in and that concurrent opt-in HUD
+# launches receive independent SQLite homes while persistent Codex metadata
+# remains reachable from the stable profile.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -14,6 +15,8 @@ LOG_FILE_1="$TEST_ROOT/tmux-1.log"
 LOG_FILE_2="$TEST_ROOT/tmux-2.log"
 OUTPUT_FILE_1="$TEST_ROOT/wrapper-1.log"
 OUTPUT_FILE_2="$TEST_ROOT/wrapper-2.log"
+DEFAULT_LOG_FILE="$TEST_ROOT/tmux-default.log"
+DEFAULT_OUTPUT_FILE="$TEST_ROOT/wrapper-default.log"
 MANAGED_CODEX_HOME="$HOME_DIR/.stepcode/codex"
 SQLITE_ROOT="$MANAGED_CODEX_HOME/.codex-hud-sqlite"
 
@@ -69,10 +72,15 @@ export TMUX_AUTO=0
 export TMUX_PANE_WIDTH=120
 export TMUX_PANE_HEIGHT=5
 
+# Keep this regression hermetic when the caller's shell has an explicit
+# CODEX_SQLITE_HOME or another Codex home configured.
+unset CODEX_SQLITE_HOME CODEX_HOME CODEX_SESSIONS_PATH
+
 run_wrapper() {
   local log_file="$1"
   local output_file="$2"
-  TMUX_LOG_FILE="$log_file" "$ROOT_DIR/bin/codex-hud" \
+  shift 2
+  env "$@" TMUX_LOG_FILE="$log_file" "$ROOT_DIR/bin/codex-hud" \
     --stepcode \
     --new-session \
     --sandbox danger-full-access \
@@ -80,9 +88,27 @@ run_wrapper() {
     >"$output_file" 2>&1
 }
 
-run_wrapper "$LOG_FILE_1" "$OUTPUT_FILE_1" &
+unset CODEX_HUD_SQLITE_ISOLATION
+run_wrapper "$DEFAULT_LOG_FILE" "$DEFAULT_OUTPUT_FILE"
+
+default_launch_line="$(grep -m1 '^respawn-pane ' "$DEFAULT_LOG_FILE" || true)"
+default_hud_line="$(grep -m1 '^split-window ' "$DEFAULT_LOG_FILE" || true)"
+if [[ -z "$default_launch_line" || -z "$default_hud_line" ]]; then
+  echo "Expected default main and HUD pane launch commands." >&2
+  exit 1
+fi
+if [[ "$default_launch_line" == *"CODEX_SQLITE_HOME="* || "$default_hud_line" == *"CODEX_SQLITE_HOME="* ]]; then
+  echo "Default HUD launches must preserve the official SQLite home without injection." >&2
+  exit 1
+fi
+if [[ -e "$SQLITE_ROOT" ]]; then
+  echo "Default HUD launches must not create the managed SQLite isolation tree: $SQLITE_ROOT" >&2
+  exit 1
+fi
+
+run_wrapper "$LOG_FILE_1" "$OUTPUT_FILE_1" CODEX_HUD_SQLITE_ISOLATION=1 &
 wrapper_pid_1=$!
-run_wrapper "$LOG_FILE_2" "$OUTPUT_FILE_2" &
+run_wrapper "$LOG_FILE_2" "$OUTPUT_FILE_2" CODEX_HUD_SQLITE_ISOLATION=1 &
 wrapper_pid_2=$!
 
 set +e
@@ -159,4 +185,4 @@ if [[ "$hud_line_2" != *"CODEX_SQLITE_HOME='$sqlite_home_2'"* ]]; then
   exit 1
 fi
 
-echo "test-wrapper-sqlite-isolation: PASS (concurrent_launches=2, distinct_homes=2, persistent_links=6, shared_log_links=0)"
+echo "test-wrapper-sqlite-isolation: PASS (default_injection=0, default_tree=0, concurrent_launches=2, distinct_homes=2, persistent_links=6, shared_log_links=0)"

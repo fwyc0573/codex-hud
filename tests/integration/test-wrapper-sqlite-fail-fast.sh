@@ -47,6 +47,7 @@ common_env=(
   "HOME=$HOME_DIR"
   "PATH=$FAKE_BIN_DIR:$FAKE_TMUX_DIR:/usr/bin:/bin"
   "CODEX_HUD_UPDATE_CHECK=0"
+  "CODEX_HUD_SQLITE_ISOLATION=1"
   "CODEX_HUD_HEIGHT=5"
   "CODEX_HUD_HEIGHT_AUTO=0"
   "TMUX_MAIN_PANE_ID=%1"
@@ -106,13 +107,15 @@ assert_no_tmux() {
 # metadata links.
 EXPLICIT_LOG="$TEST_ROOT/explicit.tmux.log"
 EXPLICIT_OUTPUT="$TEST_ROOT/explicit.output.log"
-run_wrapper "$EXPLICIT_LOG" "$EXPLICIT_OUTPUT" "CODEX_SQLITE_HOME=$EXPLICIT_SQLITE_HOME"
+run_wrapper "$EXPLICIT_LOG" "$EXPLICIT_OUTPUT" \
+  "CODEX_HUD_SQLITE_ISOLATION=1" \
+  "CODEX_SQLITE_HOME=$EXPLICIT_SQLITE_HOME"
 explicit_launch="$(grep -m1 '^respawn-pane ' "$EXPLICIT_LOG" || true)"
 explicit_hud="$(grep -m1 '^split-window ' "$EXPLICIT_LOG" || true)"
 assert_contains <(printf '%s\n' "$explicit_launch") "CODEX_SQLITE_HOME='$EXPLICIT_SQLITE_HOME'" "explicit main-pane path"
 assert_contains <(printf '%s\n' "$explicit_hud") "CODEX_SQLITE_HOME='$EXPLICIT_SQLITE_HOME'" "explicit HUD path"
-if find "$EXPLICIT_SQLITE_HOME" -mindepth 1 -type l -print -quit | grep -q .; then
-  echo "explicit CODEX_SQLITE_HOME unexpectedly received managed metadata links" >&2
+if [[ -e "$EXPLICIT_SQLITE_HOME" ]]; then
+  echo "explicit CODEX_SQLITE_HOME was created by the HUD wrapper" >&2
   exit 1
 fi
 

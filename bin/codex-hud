@@ -15,6 +15,7 @@
 #   CODEX_HUD_MOUSE - Enable tmux mouse mode for this session (default: 1)
 #   CODEX_HUD_BIND_TOGGLE - Install the legacy server-wide Prefix+H toggle (default: 0)
 #   CODEX_HUD_CLEAR_SCROLLBACK - If set to 1, clears tmux scrollback on first render
+#   CODEX_HUD_SQLITE_ISOLATION - Use a launch-scoped SQLite home (default: 0)
 #   CODEX_HUD_UPDATE_CHECK - Set to 0 or false to disable release checks and prompts
 #
 
@@ -62,6 +63,7 @@ CODEX_SESSION_PREFIX_OVERRIDE=""
 CODEX_SQLITE_HOME_OVERRIDE=""
 CODEX_SQLITE_HOME_SOURCE=""
 CODEX_SQLITE_HOME_EXPLICIT="0"
+CODEX_SQLITE_ISOLATION_ENABLED="0"
 UPDATE_HELPER_PATH="$SCRIPT_DIR/codex-hud-update.mjs"
 UPDATE_UPGRADE_PATH="$SCRIPT_DIR/codex-hud-upgrade"
 FORCE_ATTACH="0"
@@ -637,9 +639,17 @@ prepare_launch_profile_home() {
 }
 
 resolve_sqlite_home() {
+    CODEX_SQLITE_HOME_OVERRIDE=""
+    CODEX_SQLITE_HOME_SOURCE=""
+    CODEX_SQLITE_HOME_EXPLICIT="0"
+
     if [[ -n "${CODEX_SQLITE_HOME:-}" ]]; then
         CODEX_SQLITE_HOME_OVERRIDE="$CODEX_SQLITE_HOME"
         CODEX_SQLITE_HOME_EXPLICIT="1"
+        return 0
+    fi
+
+    if [[ "$CODEX_SQLITE_ISOLATION_ENABLED" != "1" ]]; then
         return 0
     fi
 
@@ -684,17 +694,22 @@ ensure_sqlite_state_link() {
 }
 
 prepare_sqlite_home() {
+    CODEX_SQLITE_ISOLATION_ENABLED=$(parse_boolean_setting \
+        "CODEX_HUD_SQLITE_ISOLATION" \
+        "${CODEX_HUD_SQLITE_ISOLATION:-}" \
+        "0") || return 1
     resolve_sqlite_home
 
     if [[ -z "$CODEX_SQLITE_HOME_OVERRIDE" ]]; then
-        error "Codex SQLite home resolved to an empty path."
-    fi
-    if ! mkdir -p "$CODEX_SQLITE_HOME_OVERRIDE"; then
-        error "Unable to create the Codex SQLite home: $CODEX_SQLITE_HOME_OVERRIDE"
+        return 0
     fi
 
     if [[ "$CODEX_SQLITE_HOME_EXPLICIT" == "1" ]]; then
         return 0
+    fi
+
+    if ! mkdir -p "$CODEX_SQLITE_HOME_OVERRIDE"; then
+        error "Unable to create the Codex SQLite home: $CODEX_SQLITE_HOME_OVERRIDE"
     fi
 
     if ! mkdir -p "$CODEX_SQLITE_HOME_SOURCE"; then
@@ -1354,6 +1369,7 @@ Environment Variables:
   CODEX_HUD_MOUSE Enable tmux mouse mode for this session (default: 1)
   CODEX_HUD_BIND_TOGGLE Install the legacy server-wide Prefix+H toggle (default: 0)
   CODEX_HUD_CLEAR_SCROLLBACK Clear terminal scrollback on first render (default: 0)
+  CODEX_HUD_SQLITE_ISOLATION Use a launch-scoped SQLite home (default: 0)
   CODEX_HUD_UPDATE_CHECK Check GitHub releases and offer deferred updates (default: enabled; 0/false disables)
 
 Requirements:

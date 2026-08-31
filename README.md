@@ -64,8 +64,8 @@ cd codex-hud
 git switch main
 ./bin/codex-hud-install
 
-# Refresh your shell, then just type:
-codex
+# Refresh your shell, then type (codex remains the native launcher for Codex CLI):
+cx
 
 # To enable automatic detection of Codex "capacity exceeded" and auto-send "continue", run:
 cd cx-continue

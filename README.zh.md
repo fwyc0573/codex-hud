@@ -63,8 +63,8 @@ cd codex-hud
 git switch main
 ./bin/codex-hud-install
 
-# 刷新 shell，然后直接输入：
-codex
+# 刷新 shell，然后直接输入 (codex 保留了原生启动方式，不被codex-hud包裹)：
+cx
 
 # 若要开启自动监测 Codex “capacity exceeded” 并自动发送 “continue”，请使用：
 cd cx-continue

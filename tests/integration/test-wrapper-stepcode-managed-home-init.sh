@@ -13,6 +13,7 @@ MANAGED_HOME="$HOME_DIR/.stepcode/codex"
 MANAGED_SESSIONS="$HOME_DIR/.codex/sessions"
 TMUX_LOG="$TEST_ROOT/tmux.log"
 OUTPUT_LOG="$TEST_ROOT/wrapper.log"
+SQLITE_ROOT="$MANAGED_HOME/.codex-hud-sqlite"
 
 mkdir -p "$FAKE_BIN" "$HOME_DIR"
 
@@ -112,4 +113,39 @@ if [[ ! -d "$MANAGED_SESSIONS" ]]; then
   exit 1
 fi
 
-echo "test-wrapper-stepcode-managed-home-init: PASS (managed_home_created=1, stable_codex_sessions_path_created=1, status=$status)"
+launch_line="$(grep -m1 '^respawn-pane ' "$TMUX_LOG" || true)"
+if [[ -z "$launch_line" ]]; then
+  echo "test-wrapper-stepcode-managed-home-init: FAIL - main launch command was not captured" >&2
+  cat "$TMUX_LOG" >&2
+  exit 1
+fi
+
+sqlite_home="${launch_line#*CODEX_SQLITE_HOME=\'}"
+if [[ "$sqlite_home" == "$launch_line" ]]; then
+  echo "test-wrapper-stepcode-managed-home-init: FAIL - CODEX_SQLITE_HOME was not propagated" >&2
+  exit 1
+fi
+sqlite_home="${sqlite_home%%\'*}"
+if [[ "$sqlite_home" != "$SQLITE_ROOT/"* ]]; then
+  echo "test-wrapper-stepcode-managed-home-init: FAIL - unexpected SQLite home: $sqlite_home" >&2
+  exit 1
+fi
+
+for database in state_5.sqlite goals_1.sqlite memories_1.sqlite; do
+  link="$sqlite_home/$database"
+  if [[ ! -L "$link" ]]; then
+    echo "test-wrapper-stepcode-managed-home-init: FAIL - missing metadata symlink: $link" >&2
+    exit 1
+  fi
+  if [[ "$(readlink -f "$link")" != "$MANAGED_HOME/$database" ]]; then
+    echo "test-wrapper-stepcode-managed-home-init: FAIL - metadata symlink target mismatch: $link" >&2
+    exit 1
+  fi
+done
+
+if [[ -L "$sqlite_home/logs_2.sqlite" ]]; then
+  echo "test-wrapper-stepcode-managed-home-init: FAIL - logs database must remain launch-local" >&2
+  exit 1
+fi
+
+echo "test-wrapper-stepcode-managed-home-init: PASS (managed_home_created=1, stable_codex_sessions_path_created=1, metadata_links=3, status=$status)"

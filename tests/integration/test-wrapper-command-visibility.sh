@@ -4,15 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FAKE_TMUX_DIR="$SCRIPT_DIR/fake-tmux"
-FAKE_BIN_ROOT="$(mktemp -d)"
+TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-command-visibility-XXXXXX)"
+FAKE_BIN_ROOT="$TEST_ROOT/bin"
 FAKE_BIN_DIR="$FAKE_BIN_ROOT/codex dir;\$(marker)"
-LOG_FILE="$(mktemp)"
-OUTPUT_FILE="$(mktemp)"
-NODE_LOG_FILE="$(mktemp)"
+LOG_FILE="$TEST_ROOT/tmux.log"
+OUTPUT_FILE="$TEST_ROOT/output.log"
+NODE_LOG_FILE="$TEST_ROOT/node.log"
 
 cleanup() {
-  rm -rf "$FAKE_BIN_ROOT"
-  rm -f "$LOG_FILE" "$OUTPUT_FILE" "$NODE_LOG_FILE"
+  rm -rf "$TEST_ROOT"
 }
 trap cleanup EXIT
 
@@ -108,10 +108,9 @@ if ! grep -F -- '-ilc' "$LOG_FILE" >/dev/null; then
 fi
 
 escaped_codex_path="$(printf '%q' "$FAKE_BIN_DIR/codex")"
-double_escaped_codex_path="$(printf '%q' "$escaped_codex_path")"
-if [[ "$launch_line" != *"$double_escaped_codex_path"* ]]; then
+if [[ "$launch_line" != *"$escaped_codex_path"* ]]; then
   echo "Codex executable path was not shell-quoted in the respawn command." >&2
-  echo "expected=$double_escaped_codex_path" >&2
+  echo "expected=$escaped_codex_path" >&2
   echo "$launch_line" >&2
   exit 1
 fi

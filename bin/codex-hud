@@ -26,22 +26,42 @@ HUD_DIR="$(dirname "$SCRIPT_DIR")"
 HUD_HEIGHT="${CODEX_HUD_HEIGHT:-}"
 HUD_POSITION="${CODEX_HUD_POSITION:-bottom}"
 ALIAS_MARKER="# codex-hud alias"
-# Keep provider classification in one table. Adding a launch profile requires
-# one row here; the tmux lifecycle below consumes the resolved command vector
-# without provider-specific branches.
+# Keep provider classification and compatibility selectors in one table. Adding
+# a launch profile requires one row here; the tmux lifecycle below consumes the
+# resolved command vector without provider-specific branches.
+#
+# Fields:
+#   profile|executable|subcommand|home_suffix|sessions_suffix|session_tag
+#     |legacy_activation_envs|legacy_required_envs|legacy_cli_env
+#     |legacy_session_prefix_env|legacy_shell_env|legacy_subcommand
+#     |legacy_command_mode
 LAUNCH_PROFILE_REGISTRY=(
-    "native|codex||||"
-    "stepcode|stepcode|codex|/.stepcode/codex|/.codex/sessions|stepcode"
+    "native|codex|||||||||||profile"
+    "stepcode|stepcode|codex|/.stepcode/codex|/.codex/sessions|stepcode|CODEX_HUD_CLI_PATH,CODEX_HUD_SESSION_PREFIX|CODEX_HUD_CLI_PATH,CODEX_HUD_SESSION_PREFIX,CODEX_HUD_SHELL_PATH|CODEX_HUD_CLI_PATH|CODEX_HUD_SESSION_PREFIX|CODEX_HUD_SHELL_PATH||direct"
 )
 LAUNCH_PROFILE="native"
+LAUNCH_PROFILE_EXPLICIT="0"
+LAUNCH_PROFILE_SOURCE="default"
 LAUNCH_PROFILE_EXECUTABLE=""
 LAUNCH_PROFILE_SUBCOMMAND=""
+LAUNCH_PROFILE_LEGACY_SUBCOMMAND=""
+LAUNCH_PROFILE_LEGACY_COMMAND_MODE=""
 LAUNCH_PROFILE_CODEX_HOME_SUFFIX=""
 LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX=""
 LAUNCH_PROFILE_SESSION_TAG=""
+LAUNCH_PROFILE_LEGACY_ACTIVATION_ENVS=""
+LAUNCH_PROFILE_LEGACY_REQUIRED_ENVS=""
+LAUNCH_PROFILE_CLI_ENV=""
+LAUNCH_PROFILE_SESSION_PREFIX_ENV=""
+LAUNCH_PROFILE_SHELL_ENV=""
 CODEX_CLI_COMMAND=()
 CODEX_HOME_OVERRIDE=""
 CODEX_SESSIONS_OVERRIDE=""
+CODEX_PANE_SHELL_PATH=""
+CODEX_SESSION_PREFIX_OVERRIDE=""
+CODEX_SQLITE_HOME_OVERRIDE=""
+CODEX_SQLITE_HOME_SOURCE=""
+CODEX_SQLITE_HOME_EXPLICIT="0"
 UPDATE_HELPER_PATH="$SCRIPT_DIR/codex-hud-update.mjs"
 UPDATE_UPGRADE_PATH="$SCRIPT_DIR/codex-hud-upgrade"
 FORCE_ATTACH="0"
@@ -238,17 +258,23 @@ SESSION_PREFIX=""
 SESSION_NAME=""
 
 refresh_session_identity() {
-    if [[ -n "$LAUNCH_PROFILE_SESSION_TAG" ]]; then
-        SESSION_PREFIX="codex-hud-${LAUNCH_PROFILE_SESSION_TAG}-${PROJECT_SLUG}-${SESSION_HASH}"
-    else
-        SESSION_PREFIX="codex-hud-${PROJECT_SLUG}-${SESSION_HASH}"
+    local session_prefix_base="codex-hud"
+    if [[ -n "$CODEX_SESSION_PREFIX_OVERRIDE" ]]; then
+        session_prefix_base="$CODEX_SESSION_PREFIX_OVERRIDE"
+    elif [[ -n "$LAUNCH_PROFILE_SESSION_TAG" ]]; then
+        session_prefix_base="codex-hud-${LAUNCH_PROFILE_SESSION_TAG}"
+    fi
+
+    if [[ -n "$session_prefix_base" ]]; then
+        SESSION_PREFIX="${session_prefix_base}-${PROJECT_SLUG}-${SESSION_HASH}"
     fi
     SESSION_NAME="${SESSION_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
 }
 
 refresh_session_identity
 
-resolve_launch_profile() {
+load_launch_profile_record() {
+    local requested_profile="$1"
     local profile_found="0"
     local registry_entry
 
@@ -259,25 +285,307 @@ resolve_launch_profile() {
         local codex_home_suffix
         local codex_sessions_suffix
         local session_tag
-        IFS='|' read -r profile_name executable subcommand codex_home_suffix codex_sessions_suffix session_tag <<< "$registry_entry"
-        if [[ "$profile_name" == "$LAUNCH_PROFILE" ]]; then
+        local legacy_activation_envs
+        local legacy_required_envs
+        local cli_env
+        local session_prefix_env
+        local shell_env
+        local legacy_subcommand
+        local legacy_command_mode
+        IFS='|' read -r profile_name executable subcommand codex_home_suffix codex_sessions_suffix session_tag legacy_activation_envs legacy_required_envs cli_env session_prefix_env shell_env legacy_subcommand legacy_command_mode <<< "$registry_entry"
+        if [[ "$profile_name" == "$requested_profile" ]]; then
             LAUNCH_PROFILE_EXECUTABLE="$executable"
             LAUNCH_PROFILE_SUBCOMMAND="$subcommand"
+            LAUNCH_PROFILE_LEGACY_SUBCOMMAND="$legacy_subcommand"
+            LAUNCH_PROFILE_LEGACY_COMMAND_MODE="$legacy_command_mode"
             LAUNCH_PROFILE_CODEX_HOME_SUFFIX="$codex_home_suffix"
             LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX="$codex_sessions_suffix"
             LAUNCH_PROFILE_SESSION_TAG="$session_tag"
+            LAUNCH_PROFILE_LEGACY_ACTIVATION_ENVS="$legacy_activation_envs"
+            LAUNCH_PROFILE_LEGACY_REQUIRED_ENVS="$legacy_required_envs"
+            LAUNCH_PROFILE_CLI_ENV="$cli_env"
+            LAUNCH_PROFILE_SESSION_PREFIX_ENV="$session_prefix_env"
+            LAUNCH_PROFILE_SHELL_ENV="$shell_env"
             profile_found="1"
             break
         fi
     done
 
     if [[ "$profile_found" != "1" ]]; then
-        error "Unsupported Codex launch profile: $LAUNCH_PROFILE"
+        error "Unsupported Codex launch profile: $requested_profile"
+    fi
+}
+
+# Validate a comma-separated list of environment variable names declared by a
+# launch profile. Registry rows are trusted source data, but validating them at
+# the boundary keeps malformed additions visible instead of silently changing
+# launch selection.
+validate_legacy_env_list() {
+    local env_list="$1"
+    local label="$2"
+    local -a env_names=()
+    local env_name
+
+    if [[ -z "$env_list" ]]; then
+        return 0
+    fi
+
+    IFS=',' read -r -a env_names <<< "$env_list"
+    if [[ "${#env_names[@]}" -eq 0 ]]; then
+        error "Launch profile '$label' declares an empty legacy environment list."
+    fi
+    for env_name in "${env_names[@]}"; do
+        if [[ -z "$env_name" || ! "$env_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            error "Launch profile '$label' declares an invalid legacy environment name: ${env_name:-<empty>}"
+        fi
+    done
+}
+
+legacy_env_list_contains() {
+    local env_list="$1"
+    local env_name="$2"
+    [[ ",$env_list," == *",$env_name,"* ]]
+}
+
+validate_legacy_profile_declaration() {
+    local profile_name="$1"
+    local activation_envs="$2"
+    local required_envs="$3"
+    local cli_env="$4"
+    local session_prefix_env="$5"
+    local shell_env="$6"
+
+    if [[ -z "$activation_envs" ]]; then
+        return 0
+    fi
+    if [[ -z "$required_envs" ]]; then
+        error "Launch profile '$profile_name' declares legacy activation without required environments."
+    fi
+
+    validate_legacy_env_list "$activation_envs" "$profile_name"
+    validate_legacy_env_list "$required_envs" "$profile_name"
+
+    local -a env_names=()
+    local env_name
+    IFS=',' read -r -a env_names <<< "$activation_envs"
+    for env_name in "${env_names[@]}"; do
+        if ! legacy_env_list_contains "$required_envs" "$env_name"; then
+            error "Launch profile '$profile_name' activates on undeclared legacy environment: $env_name"
+        fi
+    done
+
+    for env_name in "$cli_env" "$session_prefix_env" "$shell_env"; do
+        if [[ -n "$env_name" ]] && ! legacy_env_list_contains "$required_envs" "$env_name"; then
+            error "Launch profile '$profile_name' uses undeclared legacy environment: $env_name"
+        fi
+    done
+}
+
+# Select a profile from the legacy shell environment only when the caller did
+# not pass an explicit wrapper profile flag. Activation and required variable
+# names come from the registry row, so future profiles use the same mechanism.
+resolve_legacy_launch_profile() {
+    if [[ "$LAUNCH_PROFILE_EXPLICIT" == "1" ]]; then
+        return 0
+    fi
+
+    local selected_profile=""
+    local registry_entry
+
+    for registry_entry in "${LAUNCH_PROFILE_REGISTRY[@]}"; do
+        local profile_name
+        local executable
+        local subcommand
+        local codex_home_suffix
+        local codex_sessions_suffix
+        local session_tag
+        local legacy_activation_envs
+        local legacy_required_envs
+        local cli_env
+        local session_prefix_env
+        local shell_env
+        local legacy_subcommand
+        local legacy_command_mode
+        IFS='|' read -r profile_name executable subcommand codex_home_suffix codex_sessions_suffix session_tag legacy_activation_envs legacy_required_envs cli_env session_prefix_env shell_env legacy_subcommand legacy_command_mode <<< "$registry_entry"
+        if [[ -z "$legacy_activation_envs" ]]; then
+            continue
+        fi
+
+        validate_legacy_profile_declaration "$profile_name" "$legacy_activation_envs" "$legacy_required_envs" "$cli_env" "$session_prefix_env" "$shell_env"
+
+        local activation_present="0"
+        local -a activation_env_names=()
+        local env_name
+        IFS=',' read -r -a activation_env_names <<< "$legacy_activation_envs"
+        for env_name in "${activation_env_names[@]}"; do
+            if [[ -n "${!env_name+x}" ]]; then
+                activation_present="1"
+                break
+            fi
+        done
+        if [[ "$activation_present" == "0" ]]; then
+            continue
+        fi
+
+        local -a required_env_names=()
+        local missing_envs=""
+        IFS=',' read -r -a required_env_names <<< "$legacy_required_envs"
+        for env_name in "${required_env_names[@]}"; do
+            if [[ -z "${!env_name-}" ]]; then
+                if [[ -n "$missing_envs" ]]; then
+                    missing_envs="$missing_envs,"
+                fi
+                missing_envs="$missing_envs$env_name"
+            fi
+        done
+        if [[ -n "$missing_envs" ]]; then
+            error "Launch profile '$profile_name' requires these legacy environments to be set and non-empty: $missing_envs"
+        fi
+
+        if [[ -n "$selected_profile" && "$selected_profile" != "$profile_name" ]]; then
+            error "Legacy launch environment matches multiple Codex profiles: $selected_profile and $profile_name."
+        fi
+        selected_profile="$profile_name"
+    done
+
+    if [[ -z "$selected_profile" ]]; then
+        return 0
+    fi
+
+    LAUNCH_PROFILE="$selected_profile"
+    LAUNCH_PROFILE_SOURCE="legacy-env"
+}
+
+validate_session_prefix() {
+    local prefix="$1"
+    if [[ -z "$prefix" ]]; then
+        error "${LAUNCH_PROFILE_SESSION_PREFIX_ENV:-CODEX_HUD_SESSION_PREFIX} must be non-empty."
+    fi
+    # Session names are embedded in tmux targets, hooks, and prefix filters.
+    # Restrict the compatibility value to a portable, shell-safe token.
+    if [[ ! "$prefix" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        error "${LAUNCH_PROFILE_SESSION_PREFIX_ENV:-CODEX_HUD_SESSION_PREFIX} must contain only letters, digits, '_' or '-' (got: $prefix)."
+    fi
+    if [[ "${#prefix}" -gt 64 ]]; then
+        error "${LAUNCH_PROFILE_SESSION_PREFIX_ENV:-CODEX_HUD_SESSION_PREFIX} is too long (maximum 64 characters)."
+    fi
+}
+
+validate_shell_path() {
+    local shell_path="$1"
+    local shell_env_name="${LAUNCH_PROFILE_SHELL_ENV:-CODEX_HUD_SHELL_PATH}"
+
+    if [[ -z "$shell_path" ]]; then
+        error "$shell_env_name must be non-empty."
+    fi
+    if [[ "$shell_path" != /* ]]; then
+        error "$shell_env_name must be an absolute executable path (got: $shell_path)."
+    fi
+    if [[ "$shell_path" == *$'\n'* || "$shell_path" == *$'\r'* ]]; then
+        error "$shell_env_name contains a newline, which is not a valid shell path."
+    fi
+    if [[ ! -f "$shell_path" || ! -x "$shell_path" ]]; then
+        error "Configured HUD shell is missing or not executable: $shell_path"
+    fi
+    CODEX_PANE_SHELL_PATH="$shell_path"
+}
+
+validate_legacy_launch_environment() {
+    if [[ "$LAUNCH_PROFILE_SOURCE" != "legacy-env" ]]; then
+        return 0
+    fi
+
+    validate_legacy_profile_declaration \
+        "$LAUNCH_PROFILE" \
+        "$LAUNCH_PROFILE_LEGACY_ACTIVATION_ENVS" \
+        "$LAUNCH_PROFILE_LEGACY_REQUIRED_ENVS" \
+        "$LAUNCH_PROFILE_CLI_ENV" \
+        "$LAUNCH_PROFILE_SESSION_PREFIX_ENV" \
+        "$LAUNCH_PROFILE_SHELL_ENV"
+
+    local -a required_env_names=()
+    local env_name
+    local missing_envs=""
+    IFS=',' read -r -a required_env_names <<< "$LAUNCH_PROFILE_LEGACY_REQUIRED_ENVS"
+    for env_name in "${required_env_names[@]}"; do
+        if [[ -z "${!env_name-}" ]]; then
+            if [[ -n "$missing_envs" ]]; then
+                missing_envs="$missing_envs,"
+            fi
+            missing_envs="$missing_envs$env_name"
+        fi
+    done
+    if [[ -n "$missing_envs" ]]; then
+        error "Launch profile '$LAUNCH_PROFILE' requires these legacy environments to be set and non-empty: $missing_envs"
+    fi
+
+    if [[ -n "$LAUNCH_PROFILE_CLI_ENV" ]]; then
+        local cli_path="${!LAUNCH_PROFILE_CLI_ENV-}"
+        if [[ "$cli_path" != /* ]]; then
+            error "${LAUNCH_PROFILE_CLI_ENV} must be an absolute executable path (got: $cli_path)."
+        fi
+        if [[ "$cli_path" == *$'\n'* || "$cli_path" == *$'\r'* ]]; then
+            error "${LAUNCH_PROFILE_CLI_ENV} contains a newline, which is not a valid executable path."
+        fi
+        if [[ ! -f "$cli_path" || ! -x "$cli_path" ]]; then
+            error "Configured Codex CLI is missing or not executable: $cli_path"
+        fi
+        if [[ "$cli_path" -ef "$SCRIPT_DIR/codex-hud" ]]; then
+            error "${LAUNCH_PROFILE_CLI_ENV} resolves to codex-hud wrapper. Fix the launch command to point to the real executable."
+        fi
+    fi
+
+    if [[ -n "$LAUNCH_PROFILE_SESSION_PREFIX_ENV" ]]; then
+        validate_session_prefix "${!LAUNCH_PROFILE_SESSION_PREFIX_ENV-}"
+        CODEX_SESSION_PREFIX_OVERRIDE="${!LAUNCH_PROFILE_SESSION_PREFIX_ENV}"
+    fi
+    if [[ -n "$LAUNCH_PROFILE_SHELL_ENV" ]]; then
+        validate_shell_path "${!LAUNCH_PROFILE_SHELL_ENV-}"
+    fi
+    CODEX_CLI_COMMAND=()
+}
+
+resolve_launch_profile() {
+    load_launch_profile_record "$LAUNCH_PROFILE"
+    validate_legacy_profile_declaration \
+        "$LAUNCH_PROFILE" \
+        "$LAUNCH_PROFILE_LEGACY_ACTIVATION_ENVS" \
+        "$LAUNCH_PROFILE_LEGACY_REQUIRED_ENVS" \
+        "$LAUNCH_PROFILE_CLI_ENV" \
+        "$LAUNCH_PROFILE_SESSION_PREFIX_ENV" \
+        "$LAUNCH_PROFILE_SHELL_ENV"
+
+    if [[ "$LAUNCH_PROFILE_SOURCE" == "legacy-env" ]]; then
+        validate_legacy_launch_environment
+    elif [[ "$LAUNCH_PROFILE_EXPLICIT" != "1" && -n "${CODEX_HUD_SHELL_PATH:-}" ]]; then
+        # Preserve the historical standalone shell override for native
+        # launches. An explicit profile flag owns the complete launch
+        # contract, so legacy environment values remain inert.
+        validate_shell_path "$CODEX_HUD_SHELL_PATH"
     fi
 }
 
 resolve_launch_command() {
     resolve_launch_profile
+
+    local executable="$LAUNCH_PROFILE_EXECUTABLE"
+    local subcommand="$LAUNCH_PROFILE_SUBCOMMAND"
+    if [[ "$LAUNCH_PROFILE_SOURCE" == "legacy-env" ]]; then
+        case "$LAUNCH_PROFILE_LEGACY_COMMAND_MODE" in
+            direct)
+                # The configured legacy executable already dispatches to the
+                # provider command (sptecode-codex invokes `stepcode codex`).
+                subcommand="$LAUNCH_PROFILE_LEGACY_SUBCOMMAND"
+                ;;
+            profile)
+                subcommand="$LAUNCH_PROFILE_SUBCOMMAND"
+                ;;
+            *)
+                error "Unsupported legacy command mode for launch profile '$LAUNCH_PROFILE': ${LAUNCH_PROFILE_LEGACY_COMMAND_MODE:-<empty>}"
+                ;;
+        esac
+        executable="${!LAUNCH_PROFILE_CLI_ENV}"
+    fi
 
     if [[ -n "$LAUNCH_PROFILE_CODEX_HOME_SUFFIX" ]]; then
         if [[ -z "${HOME:-}" ]]; then
@@ -297,17 +605,21 @@ resolve_launch_command() {
     fi
 
     local path
-    path=$(command -v "$LAUNCH_PROFILE_EXECUTABLE" 2>/dev/null || true)
-    if [[ -z "$path" || ! -x "$path" ]]; then
-        error "$LAUNCH_PROFILE_EXECUTABLE CLI is not found as an executable in PATH."
+    if [[ "$LAUNCH_PROFILE_SOURCE" == "legacy-env" ]]; then
+        path="$executable"
+    else
+        path=$(command -v "$executable" 2>/dev/null || true)
     fi
-    if [[ "$path" == "$SCRIPT_DIR/codex-hud" ]]; then
-        error "$LAUNCH_PROFILE_EXECUTABLE resolves to codex-hud wrapper. Fix the launch command to point to the real executable."
+    if [[ -z "$path" || ! -x "$path" ]]; then
+        error "$executable CLI is not found as an executable in PATH."
+    fi
+    if [[ "$path" == "$SCRIPT_DIR/codex-hud" || "$path" -ef "$SCRIPT_DIR/codex-hud" ]]; then
+        error "$executable resolves to codex-hud wrapper. Fix the launch command to point to the real executable."
     fi
 
     CODEX_CLI_COMMAND=("$path")
-    if [[ -n "$LAUNCH_PROFILE_SUBCOMMAND" ]]; then
-        CODEX_CLI_COMMAND+=("$LAUNCH_PROFILE_SUBCOMMAND")
+    if [[ -n "$subcommand" ]]; then
+        CODEX_CLI_COMMAND+=("$subcommand")
     fi
 }
 
@@ -324,6 +636,82 @@ prepare_launch_profile_home() {
     fi
 }
 
+resolve_sqlite_home() {
+    if [[ -n "${CODEX_SQLITE_HOME:-}" ]]; then
+        CODEX_SQLITE_HOME_OVERRIDE="$CODEX_SQLITE_HOME"
+        CODEX_SQLITE_HOME_EXPLICIT="1"
+        return 0
+    fi
+
+    if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
+        CODEX_SQLITE_HOME_SOURCE="$CODEX_HOME_OVERRIDE"
+    elif [[ -n "${CODEX_HOME:-}" ]]; then
+        CODEX_SQLITE_HOME_SOURCE="$CODEX_HOME"
+    elif [[ -n "${HOME:-}" ]]; then
+        CODEX_SQLITE_HOME_SOURCE="${HOME%/}/.codex"
+    else
+        error "HOME is required to derive the Codex SQLite home."
+    fi
+
+    CODEX_SQLITE_HOME_OVERRIDE="${CODEX_SQLITE_HOME_SOURCE%/}/.codex-hud-sqlite/$SESSION_NAME"
+}
+
+ensure_sqlite_state_link() {
+    local database="$1"
+    local source_path="${CODEX_SQLITE_HOME_SOURCE%/}/$database"
+    local link_path="${CODEX_SQLITE_HOME_OVERRIDE%/}/$database"
+
+    if [[ -L "$link_path" ]]; then
+        local target
+        target=$(readlink "$link_path" 2>/dev/null || true)
+        if [[ "$target" == "$source_path" ]]; then
+            return 0
+        fi
+        error "Conflicting Codex SQLite link: $link_path points to ${target:-<unreadable>}, expected $source_path."
+    fi
+
+    if [[ -e "$link_path" ]]; then
+        error "Refusing to replace an existing Codex SQLite file: $link_path"
+    fi
+
+    if ! ln -s "$source_path" "$link_path"; then
+        # Accept an identical link created between the preflight check and ln.
+        if [[ -L "$link_path" ]] && [[ "$(readlink "$link_path" 2>/dev/null || true)" == "$source_path" ]]; then
+            return 0
+        fi
+        error "Unable to link the existing Codex SQLite database: $link_path"
+    fi
+}
+
+prepare_sqlite_home() {
+    resolve_sqlite_home
+
+    if [[ -z "$CODEX_SQLITE_HOME_OVERRIDE" ]]; then
+        error "Codex SQLite home resolved to an empty path."
+    fi
+    if ! mkdir -p "$CODEX_SQLITE_HOME_OVERRIDE"; then
+        error "Unable to create the Codex SQLite home: $CODEX_SQLITE_HOME_OVERRIDE"
+    fi
+
+    if [[ "$CODEX_SQLITE_HOME_EXPLICIT" == "1" ]]; then
+        return 0
+    fi
+
+    if ! mkdir -p "$CODEX_SQLITE_HOME_SOURCE"; then
+        error "Unable to create the stable Codex home for SQLite metadata: $CODEX_SQLITE_HOME_SOURCE"
+    fi
+
+    # Keep thread, goal, and memory metadata shared with the existing Codex
+    # home while giving each HUD launch its own log database. The links also
+    # reserve the stable database paths before Codex creates them on a fresh
+    # profile, so later launches keep using the same metadata files.
+    # SQLite resolves sidecar WAL/SHM files through these links to the source
+    # database, so active sessions retain their existing state semantics.
+    ensure_sqlite_state_link "state_5.sqlite"
+    ensure_sqlite_state_link "goals_1.sqlite"
+    ensure_sqlite_state_link "memories_1.sqlite"
+}
+
 launch_environment_prefix() {
     local prefix=""
     if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
@@ -331,6 +719,9 @@ launch_environment_prefix() {
     fi
     if [[ -n "$CODEX_SESSIONS_OVERRIDE" ]]; then
         prefix="${prefix}CODEX_SESSIONS_PATH=$(shell_quote "$CODEX_SESSIONS_OVERRIDE") "
+    fi
+    if [[ -n "$CODEX_SQLITE_HOME_OVERRIDE" ]]; then
+        prefix="${prefix}CODEX_SQLITE_HOME=$(shell_quote "$CODEX_SQLITE_HOME_OVERRIDE") "
     fi
     printf "%s" "$prefix"
 }
@@ -715,6 +1106,7 @@ create_session() {
     term_width=$(tput cols 2>/dev/null || echo 80)
     resolve_hud_height "$term_height"
     prepare_launch_profile_home
+    prepare_sqlite_home
     
     # Build the launch command string from the resolved profile vector.
     # Quote every executable, subcommand, and forwarded argument before
@@ -740,6 +1132,9 @@ create_session() {
     # Create new detached session
     tmux new-session -d -s "$SESSION_NAME" -x "$term_width" -y "$term_height"
     SESSION_CREATED="true"
+    # Mark the session so management commands can discover custom legacy
+    # prefixes without coupling discovery to a session-name convention.
+    tmux set-option -t "$SESSION_NAME" -q @codex_hud_session 1
     # Register this update-enabled session before any command is sent to it.
     register_update_session "$cwd"
     # Keep wheel scrolling available in Codex pane by default.
@@ -794,7 +1189,15 @@ create_session() {
     attach_gate_cmd="i=0; while [ \"\$(tmux show-option -t '$SESSION_NAME' -qv @codex_hud_client_attached)\" != \"1\" ] && [ \"\$i\" -lt 200 ]; do sleep 0.05; i=\$((i+1)); done"
     local codex_launch_cmd
     codex_launch_cmd="$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; codex_status=\$?; if [ \"\$codex_status\" -eq 130 ]; then if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return interrupt status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; if [ \"\$codex_status\" -ne 0 ]; then printf '\\n[codex-hud] Codex exited with status %s. Press Enter to close.\\n' \"\$codex_status\" >&2; if ! IFS= read -r _codex_hud_close; then printf '[codex-hud] Input closed before acknowledgement; returning status %s.\\n' \"\$codex_status\" >&2; fi; if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; tmux kill-session -t '$SESSION_NAME'"
-    tmux respawn-pane -k -t "$main_pane_id" "$codex_launch_cmd"
+    local pane_shell="${CODEX_PANE_SHELL_PATH:-}"
+    if [[ -n "$pane_shell" ]]; then
+        validate_shell_path "$pane_shell"
+        local shell_command
+        shell_command=$(printf "%q -ilc %q" "$pane_shell" "$codex_launch_cmd")
+        tmux respawn-pane -k -t "$main_pane_id" "$shell_command"
+    else
+        tmux respawn-pane -k -t "$main_pane_id" "$codex_launch_cmd"
+    fi
 
     # StepCode can deliver SIGINT to the full foreground process group, which
     # ends this pane shell before the inline teardown above can run. Keep the
@@ -1062,7 +1465,28 @@ kill_session() {
 # List all codex-hud sessions
 list_sessions() {
     echo "Active codex-hud sessions:"
-    tmux list-sessions 2>/dev/null | grep "^codex-hud-" || echo "  (none)"
+    local session_rows
+    if ! session_rows=$(tmux list-sessions -F '#{session_name} #{@codex_hud_session}'); then
+        error "Unable to list tmux sessions for codex-hud."
+    fi
+    local found="0"
+    local session_name
+    local marker
+    while IFS=' ' read -r session_name marker _; do
+        if [[ -z "$session_name" ]]; then
+            continue
+        fi
+        # The marker covers every session created by this version, including
+        # arbitrary validated legacy prefixes. The prefix fallback keeps older
+        # native and StepCode HUD sessions visible after an upgrade.
+        if [[ "$marker" == "1" || "$session_name" == codex-hud-* || "$session_name" == stepcode-codex-hud-* ]]; then
+            printf '%s\n' "$session_name"
+            found="1"
+        fi
+    done <<< "$session_rows"
+    if [[ "$found" != "1" ]]; then
+        echo "  (none)"
+    fi
 }
 
 # Check for special flags first
@@ -1074,6 +1498,7 @@ normalize_launch_profile_args() {
     for arg in "$@"; do
         if [[ "$before_separator" == "1" && "$arg" == "--stepcode" ]]; then
             LAUNCH_PROFILE="stepcode"
+            LAUNCH_PROFILE_EXPLICIT="1"
             continue
         fi
         normalized_args+=("$arg")
@@ -1088,14 +1513,31 @@ normalize_launch_profile_args() {
 NORMALIZED_ARGS=()
 normalize_launch_profile_args "$@"
 set -- "${NORMALIZED_ARGS[@]}"
-resolve_launch_profile
-refresh_session_identity
 
+# Profile-independent management commands must remain available when a stale
+# legacy environment points at an invalid provider executable. These commands
+# do not create or attach a Codex session, so dispatch them before profile
+# validation.
 case "${1:-}" in
     -h|--help)
         show_help
         exit 0
         ;;
+    --list)
+        if command_exists tmux; then
+            list_sessions
+        else
+            error "tmux not installed"
+        fi
+        exit 0
+        ;;
+esac
+
+resolve_legacy_launch_profile
+resolve_launch_profile
+refresh_session_identity
+
+case "${1:-}" in
     --self-check)
         self_check
         exit 0
@@ -1104,14 +1546,6 @@ case "${1:-}" in
         # Need to check dependencies to ensure tmux is available
         if command_exists tmux; then
             kill_session
-        else
-            error "tmux not installed"
-        fi
-        exit 0
-        ;;
-    --list)
-        if command_exists tmux; then
-            list_sessions
         else
             error "tmux not installed"
         fi

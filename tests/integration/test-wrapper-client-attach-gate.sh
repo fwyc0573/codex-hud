@@ -18,15 +18,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FAKE_TMUX_DIR="$SCRIPT_DIR/fake-tmux"
-FAKE_BIN_DIR="$(mktemp -d)"
-STATE_DIR="$(mktemp -d)"
-log_file=""
-output_log=""
+TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-client-attach-gate-XXXXXX)"
+FAKE_BIN_DIR="$TEST_ROOT/bin"
+STATE_DIR="$TEST_ROOT/state"
+log_file="$TEST_ROOT/tmux.log"
+output_log="$TEST_ROOT/output.log"
 
 cleanup() {
-  rm -rf "$FAKE_BIN_DIR" "$STATE_DIR"
-  [[ -n "$log_file" ]] && rm -f "$log_file"
-  [[ -n "$output_log" ]] && rm -f "$output_log"
+  rm -rf "$TEST_ROOT"
 }
 trap cleanup EXIT
 
@@ -35,6 +34,8 @@ fail() {
   [[ -n "$log_file" && -f "$log_file" ]] && { echo "--- tmux log ---" >&2; cat "$log_file" >&2; }
   exit 1
 }
+
+mkdir -p "$FAKE_BIN_DIR" "$STATE_DIR"
 
 cat > "$FAKE_BIN_DIR/codex" <<'FAKE'
 #!/usr/bin/env bash
@@ -74,8 +75,6 @@ export PATH="$FAKE_BIN_DIR:$FAKE_TMUX_DIR:$PATH"
 export CODEX_HUD_HEIGHT="5"
 export CODEX_HUD_HEIGHT_AUTO="0"
 
-log_file="$(mktemp)"
-output_log="$(mktemp)"
 export TMUX_LOG_FILE="$log_file"
 export TMUX_MAIN_PANE_ID="%1"
 export TMUX_PANE_ID="%2"

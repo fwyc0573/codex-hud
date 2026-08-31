@@ -10,6 +10,7 @@
 | 2026-08-31 | Recorded the user-reported tmux shutdown after the live-safety evidence window. |
 | 2026-08-31 | Added the final no-op-cleanup fresh suite and post-shutdown read-only checks. |
 | 2026-08-31 | Corrected the recorded baseline commit hash to the verified `HEAD`. |
+| 2026-08-31 | Recorded the post-commit full wrapper verification. |
 
 ### Modification Record
 
@@ -97,6 +98,8 @@ Final fresh-suite artifact: `/data/ycfeng/tmp/codex-hud-focused-final-final-2026
 
 Final pre-commit fresh-suite artifact: `/data/ycfeng/tmp/codex-hud-final-fresh-20260831.log` (`FINAL_FRESH_STATUS=0`; 18 scripts, 18 pass, 0 fail). The run exported `TMPDIR=/data/ycfeng/tmp` and made the child-test `rm` function a no-op so verification did not remove any temporary data.
 
+Post-commit fresh-suite artifact: `/data/ycfeng/tmp/codex-hud-postcommit-fresh-20260831.log` (`POSTCOMMIT_STATUS=0`; 18 scripts, 18 pass, 0 fail). The run used the same persistent temporary root and no-op cleanup boundary.
+
 Complete wrapper-integration artifact: `/data/ycfeng/tmp/codex-hud-all-integration-final-20260831.log` (`ALL_WRAPPER_INTEGRATION_STATUS=0`).
 
 Exact complete-suite command:
@@ -149,7 +152,7 @@ done
 | `test-wrapper-stepcode-managed-home-init.sh` | PASS | `managed_home_created=1, stable_codex_sessions_path_created=1, metadata_links=3, status=0` |
 | `test-wrapper-stepcode-fail-fast.sh` | PASS | `missing-home: status=1`; `missing-stepcode: status=1`; `missing-node: status=1` |
 | `test-wrapper-stepcode-lifecycle.sh` | PASS | Success `status=0, session_cleaned=1, sentinel_alive=1`; failure `status=43, diagnostic_retained=1, session_cleaned=1, sentinel_alive=1` |
-| `test-wrapper-client-attach-gate.sh` | PASS | Focused rerun `343 ms`; complete-suite run `508 ms`; fail-open-cap assertion passed |
+| `test-wrapper-client-attach-gate.sh` | PASS | Final pre-commit `343 ms`; post-commit `341 ms`; earlier complete-suite run `508 ms`; fail-open-cap assertion passed |
 | `test-wrapper-command-visibility.sh` | PASS | Command text remains visible in the expected tmux trace |
 | `test-wrapper-legacy-stepcode-env.sh` | PASS | `bash_route=stepcode, legacy_prefix=1, zsh_shell=1, native_route=0` |
 | `test-wrapper-launch-contract.sh` | PASS | `explicit_precedence=1` |

@@ -10,6 +10,7 @@
 | 2026-08-31 | Recorded the user-initiated tmux shutdown that occurred after the live-safety audit. |
 | 2026-08-31 | Added the final no-op-cleanup fresh suite and post-shutdown read-only checks. |
 | 2026-08-31 | Corrected the recorded baseline commit hash to the verified `HEAD`. |
+| 2026-08-31 | Recorded the post-commit full wrapper verification. |
 
 ## Session Log
 
@@ -124,3 +125,11 @@
 - Expectation: Every archived baseline reference matches `git rev-parse HEAD` from the fix worktree before integration.
 - Method: Compared the documented value with the worktree's verified `git rev-parse HEAD` output and corrected the two stale references.
 - Result: `HEAD` and all baseline references now read `874f3523d2d294d1d1117e5712af42574053de1d`.
+
+### 2026-08-31 - Post-commit verification
+
+- Status: completed.
+- Motivation: Verify the exact committed production and regression-test content before final handoff.
+- Expectation: All wrapper integration scripts remain green after both commits, with no default tmux recreation or worktree runtime artifacts.
+- Method: Ran every `tests/integration/test-wrapper-*.sh` script from `HEAD` with `TMPDIR=/data/ycfeng/tmp`, a no-op child-test `rm` function, and a 90-second timeout; captured output at `/data/ycfeng/tmp/codex-hud-postcommit-fresh-20260831.log`; then inspected commit status and runtime boundaries.
+- Result: `POSTCOMMIT_SCRIPT_COUNT=18`, `POSTCOMMIT_PASS=18`, `POSTCOMMIT_FAIL=0`, `POSTCOMMIT_STATUS=0`; attach gate block/release was `341 ms`; the committed suite retained `distinct_homes=2`, `persistent_links=6`, `shared_log_links=0`, all five SQLite fail-fast cases, lifecycle success/failure and sentinel assertions, and management bypass assertions.

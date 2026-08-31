@@ -7,6 +7,7 @@
 | 2026-08-31 | Updated the archive with the final temporary-path-compliant suite rerun. |
 | 2026-08-31 | Added the complete 18-script wrapper integration verification result. |
 | 2026-08-31 | Added the final no-op-cleanup fresh suite and post-shutdown read-only checks. |
+| 2026-08-31 | Recorded the post-commit full wrapper verification. |
 
 ### Modification Record
 
@@ -47,8 +48,8 @@ The evidence confirms large shared SQLite page-I/O pressure. It does not prove a
 | Bash legacy `stepcode codex` probe | PASS | Status `0`; wall time `394 ms`; command vector uses `sptecode-codex` through `/bin/zsh -ilc` without a duplicate `codex`; legacy prefix and shell are applied. |
 | StepCode managed home | PASS | `managed_home_created=1`; `stable_codex_sessions_path_created=1`; `metadata_links=3`; status `0`. |
 | StepCode lifecycle | PASS | Success status `0`, `session_cleaned=1`, `sentinel_alive=1`; failure status `43`, `diagnostic_retained=1`, `session_cleaned=1`, `sentinel_alive=1`. |
-| Client-attach gate | PASS | Final fresh run block/release `343 ms`; earlier complete-suite run `508 ms`; fail-open cap test passed; configured cap is `200 * 0.05 s` (about `10 s`). |
-| Full wrapper integration | PASS | Final fresh run covered all 18 `test-wrapper-*.sh` scripts with `FINAL_FRESH_PASS=18`, `FINAL_FRESH_FAIL=0`, `FINAL_FRESH_STATUS=0`; earlier isolated-server run also returned `ALL_WRAPPER_INTEGRATION_STATUS=0`. |
+| Client-attach gate | PASS | Final pre-commit block/release `343 ms`; post-commit `341 ms`; earlier complete-suite run `508 ms`; fail-open cap test passed; configured cap is `200 * 0.05 s` (about `10 s`). |
+| Full wrapper integration | PASS | Post-commit run covered all 18 `test-wrapper-*.sh` scripts with `POSTCOMMIT_PASS=18`, `POSTCOMMIT_FAIL=0`, `POSTCOMMIT_STATUS=0`; earlier runs also returned `FINAL_FRESH_STATUS=0` and `ALL_WRAPPER_INTEGRATION_STATUS=0`. |
 | Resume durability | PASS | Historical thread `019ff98f-7060-7842-b8f7-7b4e798d367f`; `historical_turns=2`; init `2.370 s`; resume `0.045 s`; total `2.415 s`; process exit `0`; rollout remained `21,556` bytes. |
 | Real native SQLite file | PASS | Native startup exit `0`, latency `1,348 ms`; `logs_2.sqlite` regular file `49,152` bytes with WAL/SHM sidecars; rollout `21,556 -> 21,556` bytes. |
 | Native TUI visibility | PASS | First non-empty output `157 ms`; first prompt `2,989 ms`; total probe elapsed `14,055 ms`; launch-local `logs_2.sqlite` regular file. |

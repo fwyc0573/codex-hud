@@ -65,7 +65,9 @@ Quick command wrappers:
   ./bin/codex-hud-uninstall
 
 Launch aliases (bash/zsh):
-  codex, cx, codex-resume
+  cx, codex-resume
+
+The native codex command remains unchanged.
 EOF
 }
 
@@ -237,7 +239,7 @@ get_rc_file() {
     esac
 }
 
-# Backup existing codex aliases if present
+# Backup existing HUD aliases if present
 backup_existing_aliases() {
     local rc_file="$1"
     
@@ -247,7 +249,6 @@ backup_existing_aliases() {
     
     local existing_aliases=""
     local alias_names=(
-        "codex"
         "cx"
         "codex-resume"
         "codex-hud-install"
@@ -265,13 +266,13 @@ backup_existing_aliases() {
     done
     
     if [[ -n "$existing_aliases" ]]; then
-        warn "Found existing codex alias entries in $rc_file"
+        warn "Found existing codex-hud alias entries in $rc_file"
         echo "$existing_aliases" >> "$BACKUP_FILE"
         info "Backed up to $BACKUP_FILE"
         
         local temp_file
         temp_file=$(mktemp)
-        grep -Ev "^alias (codex|cx|codex-resume|codex-hud-install|codex-hud-sync|codex-hud-upgrade|codex-hud-uninstall)[= ]" "$rc_file" > "$temp_file" || true
+        grep -Ev "^alias (cx|codex-resume|codex-hud-install|codex-hud-sync|codex-hud-upgrade|codex-hud-uninstall)[= ]" "$rc_file" > "$temp_file" || true
         mv "$temp_file" "$rc_file"
     fi
 }
@@ -281,7 +282,6 @@ write_aliases() {
     local shell_name="$2"
 
     if [[ "$shell_name" == "fish" ]]; then
-        echo "alias codex '$WRAPPER_PATH'  $MARKER" >> "$rc_file"
         echo "alias cx '$WRAPPER_PATH'  $MARKER" >> "$rc_file"
         echo "alias codex-resume '$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
         echo "alias codex-hud-install '$INSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
@@ -291,7 +291,6 @@ write_aliases() {
         return 0
     fi
 
-    echo "alias codex='$WRAPPER_PATH'  $MARKER" >> "$rc_file"
     echo "alias cx='$WRAPPER_PATH'  $MARKER" >> "$rc_file"
     echo "alias codex-resume='$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
     echo "alias codex-hud-install='$INSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
@@ -602,7 +601,8 @@ main() {
     echo "  2. Run: ${CYAN}source $bash_rc${NC} (bash)"
     echo "     or: ${CYAN}source $zsh_rc${NC} (zsh)"
     echo ""
-    echo "Then just type ${GREEN}codex${NC} or ${GREEN}cx${NC} to start Codex with the HUD!"
+    echo "The native ${GREEN}codex${NC} command remains unchanged."
+    echo "Then type ${GREEN}cx${NC} to start Codex with the HUD."
     echo "Or use ${GREEN}codex-resume${NC} to resume with the HUD wrapper."
     echo "Management commands: ${GREEN}codex-hud-sync${NC}, ${GREEN}codex-hud-upgrade${NC}, ${GREEN}codex-hud-uninstall${NC}"
     echo ""

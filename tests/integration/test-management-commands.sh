@@ -117,7 +117,6 @@ assert_alias_absent() {
 "$ROOT_DIR/bin/codex-hud-install" >/tmp/codex-hud-manage-install.log 2>&1
 
 for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$ZDOTDIR/.zshrc"; do
-  assert_alias_present "$file" "codex"
   assert_alias_present "$file" "cx"
   assert_alias_present "$file" "codex-resume"
   assert_alias_present "$file" "codex-hud-install"
@@ -133,7 +132,12 @@ FISH_CONFIG="$FISH_HOME/.config/fish/config.fish"
 mkdir -p "$(dirname "$FISH_CONFIG")"
 HOME="$FISH_HOME" SHELL=/bin/fish \
   "$ROOT_DIR/bin/codex-hud-install" >/tmp/codex-hud-manage-fish-install.log 2>&1
-for alias_name in codex cx codex-resume codex-hud-install codex-hud-sync codex-hud-upgrade codex-hud-uninstall; do
+if grep -q "^alias codex " "$FISH_CONFIG"; then
+  echo "native codex must not be shadowed in fish config" >&2
+  cat "$FISH_CONFIG" >&2
+  exit 1
+fi
+for alias_name in cx codex-resume codex-hud-install codex-hud-sync codex-hud-upgrade codex-hud-uninstall; do
   if ! grep -q "^alias $alias_name " "$FISH_CONFIG"; then
     echo "expected fish alias $alias_name in $FISH_CONFIG" >&2
     cat "$FISH_CONFIG" >&2
@@ -142,7 +146,7 @@ for alias_name in codex cx codex-resume codex-hud-install codex-hud-sync codex-h
 done
 HOME="$FISH_HOME" SHELL=/bin/fish \
   "$ROOT_DIR/bin/codex-hud-uninstall" >/tmp/codex-hud-manage-fish-uninstall.log 2>&1
-for alias_name in codex cx codex-resume codex-hud-install codex-hud-sync codex-hud-upgrade codex-hud-uninstall; do
+for alias_name in cx codex-resume codex-hud-install codex-hud-sync codex-hud-upgrade codex-hud-uninstall; do
   if grep -q "^alias $alias_name " "$FISH_CONFIG"; then
     echo "expected fish alias $alias_name to be removed from $FISH_CONFIG" >&2
     cat "$FISH_CONFIG" >&2
@@ -157,6 +161,8 @@ EOF
 
 "$ROOT_DIR/bin/codex-hud-sync" >/tmp/codex-hud-manage-sync.log 2>&1
 
+assert_alias_absent "$HOME/.bashrc" "codex"
+assert_alias_present "$HOME/.bashrc" "cx"
 assert_alias_present "$HOME/.bashrc" "codex-hud-sync"
 assert_alias_present "$HOME/.bashrc" "codex-hud-upgrade"
 assert_alias_present "$HOME/.bashrc" "codex-hud-uninstall"

@@ -190,9 +190,14 @@ if [[ "$(cat "$SUCCESS_CHECKOUT/dist/commit")" != "$TARGET_HEAD" ]]; then
 fi
 
 SUCCESS_ZSHRC="$HOME_DIR/success/.zshrc"
-if [[ ! -f "$SUCCESS_ZSHRC" ]] || ! grep -Fqx "alias codex='$SUCCESS_CHECKOUT/bin/codex-hud'  # codex-hud alias" "$SUCCESS_ZSHRC"; then
-  echo 'successful upgrade did not write the alias to the isolated ZDOTDIR' >&2
+if [[ ! -f "$SUCCESS_ZSHRC" ]] || ! grep -Fqx "alias cx='$SUCCESS_CHECKOUT/bin/codex-hud'  # codex-hud alias" "$SUCCESS_ZSHRC"; then
+  echo 'successful upgrade did not write the cx alias to the isolated ZDOTDIR' >&2
   cat "$SUCCESS_ZSHRC" 2>/dev/null >&2 || true
+  exit 1
+fi
+if grep -Eq '^alias codex=.*# codex-hud alias$' "$SUCCESS_ZSHRC"; then
+  echo 'successful upgrade unexpectedly shadowed the native codex command' >&2
+  cat "$SUCCESS_ZSHRC" >&2
   exit 1
 fi
 

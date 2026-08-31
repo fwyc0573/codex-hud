@@ -19,6 +19,7 @@ Windows サポートは Ubuntu WSL 経由で `feature/windows-support-dual-entry
 
 ## お知らせ
 
+- **[2026-08-15]** Codex SQLite の I/O 競合を最適化し、起動フェーズ中のブロッキング問題を修正しました。`codex` と `cx` コマンドを分離し、`codex` からネイティブの Codex CLI を起動できるようになりました。
 - **[2026-08-15]** OpenAI 上流の「capacity exceeded」の自動検出と自動「continue」処理を追加しました。使い方は `cx-continue/README.md` を参照してください。
 - **[2026-07-20]** 最初の正式版 v1.0 をリリースし、macOS と Linux を完全サポートしました。
 
@@ -63,8 +64,10 @@ cd codex-hud
 git switch main
 ./bin/codex-hud-install
 
-# シェルをリフレッシュして、以下を入力：
-codex
+# シェルをリフレッシュして、cx を入力（codex は Codex CLI のネイティブランチャーとして維持されます）：
+source ~/.zhshrc
+source ~/.bashrc
+cx
 
 # Codex の「capacity exceeded」を自動検出し「continue」を自動送信する場合は、以下を使用：
 cd cx-continue

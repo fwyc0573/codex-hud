@@ -19,6 +19,7 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 ## 更新动态
 
+- **[2026-08-15]** 优化了 Codex SQLite 的 I/O 竞争并修复启动阶段的阻塞问题。`codex` 和 `cx` 命令现已隔离，用户可以通过 `codex` 启动原生 Codex CLI。
 - **[2026-08-15]** 新增对 OpenAI 上游 “capacity exceeded” 的自动监测与自动 “continue” 处理。用法参见 `cx-continue/README.md`。
 - **[2026-07-20]** 发布首个正式版本 v1.0，完整支持 macOS 和 Linux。
 
@@ -63,7 +64,9 @@ cd codex-hud
 git switch main
 ./bin/codex-hud-install
 
-# 刷新 shell，然后直接输入 (codex 保留了原生启动方式，不被codex-hud包裹)：
+# 刷新 shell，然后输入 cx（codex 保留为 Codex CLI 的原生启动器）：
+source ~/.zhshrc
+source ~/.bashrc
 cx
 
 # 若要开启自动监测 Codex “capacity exceeded” 并自动发送 “continue”，请使用：

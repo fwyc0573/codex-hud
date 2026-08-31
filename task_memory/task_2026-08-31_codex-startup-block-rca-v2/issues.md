@@ -3,6 +3,7 @@
 | Date       | Summary of Changes |
 | ---------- | ------------------ |
 | 2026-08-31 | Closed the startup RCA ledger, classified both supplied hypotheses, and recorded residual management risks. |
+| 2026-08-31 | Added the manual-install stale-parent-shell alias finding. |
 
 ### Modification Record
 
@@ -51,6 +52,8 @@
 - `--help` and `--list` dispatch before stale provider validation; `test-wrapper-management-bypass.sh` reports `list_status=0`, `help_status=0`, and `stale_profile_ignored=2`. `--list` now surfaces tmux socket/server errors (`status=1`, `error_visible=1`) instead of reporting `(none)`.
 
 ## Residual and Deferred Issues
+
+0. The installer writes aliases to shell startup files but cannot mutate aliases already loaded in its parent shell. After `./bin/codex-hud-install`, the operator must start a new shell or source the RC file before using `cx`; otherwise an older `cx` alias can launch the native Codex command or another checkout. This is an operator-shell state issue, not a wrapper runtime hang.
 
 1. `kill_session()` still uses a filtered `tmux list-sessions ... || true`; a tmux socket/server failure can be rendered as “No session found.” This management-only diagnostic gap does not participate in startup, pane creation, SQLite initialization, or attach gating. Track a separate fail-fast hardening change.
 2. `find_existing_session()` similarly treats a failed tmux query as an empty result when attach policy is used. The default new-session path and all startup acceptance probes remain unaffected. Add an attach-policy error regression in a separate change.

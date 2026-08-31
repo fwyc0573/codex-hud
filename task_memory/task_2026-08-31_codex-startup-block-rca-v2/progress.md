@@ -11,6 +11,7 @@
 | 2026-08-31 | Added the final no-op-cleanup fresh suite and post-shutdown read-only checks. |
 | 2026-08-31 | Corrected the recorded baseline commit hash to the verified `HEAD`. |
 | 2026-08-31 | Recorded the post-commit full wrapper verification. |
+| 2026-08-31 | Recorded the manual-install alias refresh trap and direct real-wrapper probe. |
 
 ## Session Log
 
@@ -133,3 +134,11 @@
 - Expectation: All wrapper integration scripts remain green after both commits, with no default tmux recreation or worktree runtime artifacts.
 - Method: Ran every `tests/integration/test-wrapper-*.sh` script from `HEAD` with `TMPDIR=/data/ycfeng/tmp`, a no-op child-test `rm` function, and a 90-second timeout; captured output at `/data/ycfeng/tmp/codex-hud-postcommit-fresh-20260831.log`; then inspected commit status and runtime boundaries.
 - Result: `POSTCOMMIT_SCRIPT_COUNT=18`, `POSTCOMMIT_PASS=18`, `POSTCOMMIT_FAIL=0`, `POSTCOMMIT_STATUS=0`; attach gate block/release was `341 ms`; the committed suite retained `distinct_homes=2`, `persistent_links=6`, `shared_log_links=0`, all five SQLite fail-fast cases, lifecycle success/failure and sentinel assertions, and management bypass assertions.
+
+### 2026-08-31 - Manual install alias refresh investigation
+
+- Status: completed.
+- Motivation: The user reported that entering the fix worktree, running `./bin/codex-hud-install`, and immediately typing `cx` still produced no visible Codex CLI pane.
+- Expectation: Separate a stale alias in the already-running parent shell from a regression in the committed wrapper.
+- Method: Reproduced an existing-shell case with `alias cx=codex` before invoking `bin/codex-hud`; then ran the committed wrapper directly in a fresh isolated tmux socket with `TERM=xterm-256color` and `CODEX_HUD_UPDATE_CHECK=0`.
+- Result: The installer correctly wrote the worktree alias to the RC file, but the parent shell retained `cx=codex`; the installer output requires `source` or a new terminal. The direct committed wrapper created both panes and reached the real Codex prompt, so this report does not add a new runtime defect.

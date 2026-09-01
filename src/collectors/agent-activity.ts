@@ -419,12 +419,16 @@ function isStartedActivityKind(value: unknown): boolean {
     return true;
   }
 
-  if (value === 'interacted' || value === 'interrupted') {
+  if (
+    value === 'interacted' ||
+    value === 'interrupted' ||
+    value === 'completed'
+  ) {
     return false;
   }
 
   throw new Error(
-    'Invalid agent spawn activity: kind must be "started", "interacted", or "interrupted".'
+    'Invalid agent spawn activity: kind must be "started", "interacted", "interrupted", or "completed".'
   );
 }
 

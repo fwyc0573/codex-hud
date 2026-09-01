@@ -66,13 +66,15 @@ try {
     });
   });
 
-  await check('ignores non-start activity and unrelated item shapes', async () => {
+  await check('ignores legal non-start activity and unrelated item shapes', async () => {
     const { normalizeAgentSpawnSeed } = await agentActivity();
     const ignored = [
       legacyAgentStart({ kind: 'interacted' }),
       legacyAgentStart({ kind: 'interrupted' }),
+      legacyAgentStart({ kind: 'completed' }),
       paginatedAgentStart({ kind: 'interacted' }),
       paginatedAgentStart({ kind: 'interrupted' }),
+      paginatedAgentStart({ kind: 'completed' }),
       paginatedAgentStart({ itemType: 'CommandExecution' }),
       {
         timestamp: '2026-07-12T00:00:00.000Z',
@@ -99,10 +101,8 @@ try {
     delete missingPaginatedKind.payload.item.kind;
     const malformed = [
       missingLegacyKind,
-      legacyAgentStart({ kind: 'completed' }),
       legacyAgentStart({ kind: 123 }),
       missingPaginatedKind,
-      paginatedAgentStart({ kind: 'completed' }),
       paginatedAgentStart({ kind: 123 }),
     ];
 

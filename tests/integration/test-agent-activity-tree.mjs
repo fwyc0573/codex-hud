@@ -99,6 +99,46 @@ function logCount(logs, fragment) {
 const testRoot = makeAgentTestRoot();
 
 try {
+  await check('replays historical completed agent activity without root tracking error', async () => {
+    const ROOT = thread(900);
+    const rootPath = writeRolloutFile(testRoot, {
+      sessionId: ROOT,
+      relativeDir: '2026/07/12',
+      timestampLabel: '2026-07-12T04-00-00',
+      records: [
+        canonicalSessionMeta({ id: ROOT }),
+        taskStarted({
+          turnId: 'resume-root-turn',
+          startedAt: 100,
+          timestamp: timestamp(100_000),
+        }),
+        legacyAgentStart({
+          eventId: 'call_completed_history',
+          kind: 'completed',
+          occurredAtMs: 100_100,
+          timestamp: timestamp(100_100),
+        }),
+      ],
+    });
+    const logs = [];
+    const collector = new AgentActivityCollector({
+      inactivityTimeoutMs: 1_000,
+      logError: (message) => logs.push(message),
+    });
+    collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+
+    const first = await collector.collect(100_200);
+    assert.equal(first.rootTrackingError, false);
+    assert.equal(first.visibleAgentCount, 0);
+    assert.deepEqual(first.rows, []);
+    assert.deepEqual(logs, []);
+
+    const replay = await collector.collect(100_200);
+    assert.equal(replay.rootTrackingError, false);
+    assert.equal(replay.visibleAgentCount, 0);
+    assert.deepEqual(logs, []);
+  });
+
   await check('collects one authoritative recursive tree across root and child fork history', async () => {
     const SOURCE = thread(1);
     const ROOT = thread(2);
@@ -506,7 +546,7 @@ try {
     const transactionPrefix = fs.readFileSync(partialPath, 'utf8');
     appendRolloutRecords(partialPath, [
       transactionSeed,
-      legacyAgentStart({ kind: 'completed', timestamp: timestamp(8_400) }),
+      legacyAgentStart({ kind: 'unexpected', timestamp: timestamp(8_400) }),
     ]);
     const processingError = await collector.collect(8_400);
     assert.equal(processingError.rows[0].status, 'tracking-error');

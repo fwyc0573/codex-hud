@@ -19,7 +19,7 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 ## 更新动态
 
-- **[2026-08-15]** 优化了 Codex SQLite 的 I/O 竞争并修复启动阶段的阻塞问题。`codex` 和 `cx` 命令现已隔离，用户可以通过 `codex` 启动原生 Codex CLI。
+- **[2026-09-01]** 实现了对Codex CLI版本 >= 0.410.0 的支持；优化了 Codex SQLite 的 I/O 竞争并修复启动阶段的阻塞问题。`codex` 和 `cx` 命令现已隔离，用户可以通过 `codex` 启动原生 Codex CLI。
 - **[2026-08-15]** 新增对 OpenAI 上游 “capacity exceeded” 的自动监测与自动 “continue” 处理。用法参见 `cx-continue/README.md`。
 - **[2026-07-20]** 发布首个正式版本 v1.0，完整支持 macOS 和 Linux。
 
@@ -43,9 +43,9 @@ Windows 支持已在 `feature/windows-support-dual-entry` branch 通过 Ubuntu W
 
 **Q: 需要手动配置 tmux 吗？**
 
-不需要。Codex HUD 自动激活 tmux。只需输入 `codex`，HUD 就会出现。如果没装 tmux，安装程序也会搞定。
+不需要。Codex HUD 自动激活 tmux。只需输入 `cx`，HUD 就会出现。如果没装 tmux，安装程序也会搞定。
 
-如果你已经在 tmux pane 中运行 `codex`、`cx` 或 `codex-hud`，wrapper 会在同一个
+如果你已经在 tmux pane 中运行 `cx` 或 `codex-hud`，wrapper 会在同一个
 tmux socket 上打开嵌套 client，并保留外层 session。关闭 HUD 后会返回原来的 pane。
 
 ## 快速开始
@@ -67,6 +67,7 @@ git switch main
 # 刷新 shell，然后输入 cx（codex 保留为 Codex CLI 的原生启动器）：
 source ~/.zhshrc
 source ~/.bashrc
+# 如果想在当前 session 中隔离 sqlite 以加速 I/O，可额外添加 export `CODEX_HUD_SQLITE_ISOLATION=1`
 cx
 
 # 若要开启自动监测 Codex “capacity exceeded” 并自动发送 “continue”，请使用：
@@ -97,12 +98,12 @@ codex
 
 首次安装后，以下命令自动加入 shell：
 
-| 命令 | 说明 |
-|------|------|
-| `cx` | 使用 HUD 启动 Codex（与 `codex` 使用同一个 wrapper） |
-| `codex-hud-sync` | 重新构建并刷新当前 checkout 的别名 |
-| `codex-hud-upgrade` | 事务化拉取、验证并启用最新 build |
-| `codex-hud-uninstall` | 移除别名并停止 HUD 会话 |
+| 命令                  | 说明                                                 |
+| --------------------- | ---------------------------------------------------- |
+| `cx`                  | 使用 HUD 启动 Codex（与 `codex` 使用同一个 wrapper） |
+| `codex-hud-sync`      | 重新构建并刷新当前 checkout 的别名                   |
+| `codex-hud-upgrade`   | 事务化拉取、验证并启用最新 build                     |
+| `codex-hud-uninstall` | 移除别名并停止 HUD 会话                              |
 
 ## HUD 显示了什么？
 
@@ -115,13 +116,13 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ codex_cli_explore 2m14s ↳2
 ```
 
-| 行 | 内容 |
-|----|------|
-| **标题** | 模型 + effort、context 进度条、项目名、git 分支、会话计时 |
-| **环境** | 配置数、MCP 服务器、启用的 skills/hooks、指令文件、审批/沙箱策略和 Fast mode |
-| **Tokens** | 总 token（输入/cache/输出拆分）、context 填充率、compact 次数 |
-| **Session** | 工作目录、Session ID、CLI 版本 |
-| **活动** | 正在执行的工具调用、最近工具调用历史和活跃 subagent |
+| 行          | 内容                                                                         |
+| ----------- | ---------------------------------------------------------------------------- |
+| **标题**    | 模型 + effort、context 进度条、项目名、git 分支、会话计时                    |
+| **环境**    | 配置数、MCP 服务器、启用的 skills/hooks、指令文件、审批/沙箱策略和 Fast mode |
+| **Tokens**  | 总 token（输入/cache/输出拆分）、context 填充率、compact 次数                |
+| **Session** | 工作目录、Session ID、CLI 版本                                               |
+| **活动**    | 正在执行的工具调用、最近工具调用历史和活跃 subagent                          |
 
 Approval 会根据 Codex 最新运行时 permission 显示为 `ask for approval`、
 `approve for me` 或 `full access`。Codex 运行过程中修改 permission 后，HUD 会在
@@ -167,30 +168,30 @@ codex-hud --self-check       # 运行环境诊断
 
 ### 环境变量
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `CODEX_HUD_POSITION` | `bottom` | HUD 面板位置（`top` / `bottom`） |
-| `CODEX_HUD_HEIGHT` | 5 行 | HUD 高度（行数） |
-| `CODEX_HUD_MOUSE` | `1` | 启用鼠标/触控板滚动 |
-| `CODEX_HUD_UPDATE_CHECK` | 启用 | 检查 GitHub 正式 Release 并提供延后更新（设为 `0`/`false` 可禁用） |
+| 变量                     | 默认值   | 说明                                                               |
+| ------------------------ | -------- | ------------------------------------------------------------------ |
+| `CODEX_HUD_POSITION`     | `bottom` | HUD 面板位置（`top` / `bottom`）                                   |
+| `CODEX_HUD_HEIGHT`       | 5 行     | HUD 高度（行数）                                                   |
+| `CODEX_HUD_MOUSE`        | `1`      | 启用鼠标/触控板滚动                                                |
+| `CODEX_HUD_UPDATE_CHECK` | 启用     | 检查 GitHub 正式 Release 并提供延后更新（设为 `0`/`false` 可禁用） |
 
 <details>
 <summary>全部环境变量</summary>
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `CODEX_HUD_HEIGHT_AUTO` | `0` | 根据宽度自动调整高度 |
-| `CODEX_HUD_HEIGHT_MIN` | `CODEX_HUD_HEIGHT` | 自动模式最小高度 |
-| `CODEX_HUD_HEIGHT_MAX` | `12` | 自动模式最大高度 |
-| `CODEX_HUD_AUTO_ATTACH` | `0` | 自动复用同目录最新会话 |
-| `CODEX_HUD_ALTERNATE_SCREEN` | `0` | codex pane 的 tmux alternate-screen |
-| `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | 首次渲染时清理 scrollback |
-| `CODEX_HUD_BIND_TOGGLE` | `0` | 可选启用旧版 server-wide Prefix+H HUD 切换快捷键 |
-| `CODEX_HUD_UPDATE_CHECK` | 启用 | 每 12 小时最多检查一次新的稳定 GitHub Release，并在 session 退出后询问是否更新 |
-| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | running agent 的界面 timeout；只接受正 safe integer 毫秒值 |
-| `CODEX_HUD_CWD` | （未设置） | 覆盖工作目录 |
-| `CODEX_HOME` | `~/.codex` | Codex home 目录 |
-| `CODEX_SESSIONS_PATH` | （未设置） | 覆盖 sessions 目录 |
+| 变量                                    | 默认值             | 说明                                                                           |
+| --------------------------------------- | ------------------ | ------------------------------------------------------------------------------ |
+| `CODEX_HUD_HEIGHT_AUTO`                 | `0`                | 根据宽度自动调整高度                                                           |
+| `CODEX_HUD_HEIGHT_MIN`                  | `CODEX_HUD_HEIGHT` | 自动模式最小高度                                                               |
+| `CODEX_HUD_HEIGHT_MAX`                  | `12`               | 自动模式最大高度                                                               |
+| `CODEX_HUD_AUTO_ATTACH`                 | `0`                | 自动复用同目录最新会话                                                         |
+| `CODEX_HUD_ALTERNATE_SCREEN`            | `0`                | codex pane 的 tmux alternate-screen                                            |
+| `CODEX_HUD_CLEAR_SCROLLBACK`            | `0`                | 首次渲染时清理 scrollback                                                      |
+| `CODEX_HUD_BIND_TOGGLE`                 | `0`                | 可选启用旧版 server-wide Prefix+H HUD 切换快捷键                               |
+| `CODEX_HUD_UPDATE_CHECK`                | 启用               | 每 12 小时最多检查一次新的稳定 GitHub Release，并在 session 退出后询问是否更新 |
+| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000`           | running agent 的界面 timeout；只接受正 safe integer 毫秒值                     |
+| `CODEX_HUD_CWD`                         | （未设置）         | 覆盖工作目录                                                                   |
+| `CODEX_HOME`                            | `~/.codex`         | Codex home 目录                                                                |
+| `CODEX_SESSIONS_PATH`                   | （未设置）         | 覆盖 sessions 目录                                                             |
 
 </details>
 
@@ -230,12 +231,12 @@ enabled = true
 
 ## 系统支持
 
-| 平台 | 状态 |
-|------|------|
-| Linux | 已支持 |
-| macOS (Apple Silicon) | 已支持 |
-| macOS (Intel) | 待测试 |
-| Windows (WSL) | 已在 `feature/windows-support-dual-entry` 支持 |
+| 平台                  | 状态                                           |
+| --------------------- | ---------------------------------------------- |
+| Linux                 | 已支持                                         |
+| macOS (Apple Silicon) | 已支持                                         |
+| macOS (Intel)         | 待测试                                         |
+| Windows (WSL)         | 已在 `feature/windows-support-dual-entry` 支持 |
 
 ## 开发
 

@@ -13,26 +13,23 @@ Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex)
 
 ![Codex HUD — Single Session](./doc/fig/screenshot.png)
 
-
 ## News
 
+- **[2026-09-01]** Suppported Codex CLI version >=  0.410.0; Optimized the I/O competition of Codex SQLite and fixed the blocking issue during the start up phase. The `codex` and `cx` commands have been isolated, and users can now start native codex CLI through `codex`.
 - **[2026-08-15]** Added automatic detection of OpenAI upstream "capacity exceeded" blocks, with automatic "continue" handling. See `cx-continue/README.md` for usage.
 - **[2026-07-20]** Released the first stable version, v1.0, with full support for macOS and Linux.
-
-
 
 ## Why Codex HUD?
 
 **Q: Codex CLI already works. Why do I need a HUD?**
 
 Because you're flying blind without one. Codex HUD gives you a persistent dashboard at the bottom of your terminal:
+
 - **tmux** — natively run Codex CLI in an optimized tmux with zero setup (scroll up and down to review the conversation history)
 - **Auto-continue** — automatically detect OpenAI "capacity exceeded" blocks and resume the task by sending "continue"
 - **Branch, model, permission, mode** — at a glance, no guessing
 - **MCP server status & tool calls, skills & agent actions** — watch what Codex is actually doing
 - **Context window fill bar** — graphically see when you're about to hit the wall
-
-
 
 **Q: I run multiple Codex sessions. Can I monitor them all?**
 
@@ -42,15 +39,16 @@ Yes. Toggle to **multi-session overview** (`Ctrl+T`) and see every active sessio
 
 **Q: Do I need to set up tmux manually?**
 
-No. Codex HUD auto-activates tmux for you. Just type `codex` and the HUD appears. If tmux isn't installed, the installer handles that too.
+No. Codex HUD auto-activates tmux for you. Just type `cx` and the HUD appears. If tmux isn't installed, the installer handles that too.
 
-If you launch `codex`, `cx`, or `codex-hud` from an existing tmux pane, the
+If you launch `cx` or `codex-hud` from an existing tmux pane, the
 wrapper opens a nested client on the same tmux socket and keeps the outer
 session alive. Closing the HUD returns you to the original pane.
 
 ## Quick Start
 
 ### One prompt to install (by agents)
+
 ```bash
 Install codex-hud (https://github.com/fwyc0573/codex-hud) for the Codex CLI by following the instructions in its README.md. To enable automatic detection of Codex "capacity exceeded" and auto-send "continue", go to cx-continue/ and run ./bin/cx-continue-ctl start.
 
@@ -64,7 +62,10 @@ cd codex-hud
 git switch main
 ./bin/codex-hud-install
 
-# Refresh your shell, then type (codex remains the native launcher for Codex CLI):
+# Refresh your shell, then type cx (codex remains the native launcher for Codex CLI):
+source ~/.zhshrc
+source ~/.bashrc
+# If you want to isolate the sqlite for current session to accelerate the I/O, additionally add export `CODEX_HUD_SQLITE_ISOLATION=1`
 cx
 
 # To enable automatic detection of Codex "capacity exceeded" and auto-send "continue", run:
@@ -97,12 +98,12 @@ codex
 
 After the first install, these are available in your shell:
 
-| Command | Description |
-|---------|-------------|
-| `cx` | Start Codex with the HUD (same wrapper as `codex`) |
-| `codex-hud-sync` | Rebuild and refresh aliases for the current checkout |
-| `codex-hud-upgrade` | Transactionally fetch, verify, and activate the latest build |
-| `codex-hud-uninstall` | Remove aliases and stop HUD sessions |
+| Command               | Description                                                  |
+| --------------------- | ------------------------------------------------------------ |
+| `cx`                  | Start Codex with the HUD        |
+| `codex-hud-sync`      | Rebuild and refresh aliases for the current checkout         |
+| `codex-hud-upgrade`   | Transactionally fetch, verify, and activate the latest build |
+| `codex-hud-uninstall` | Remove aliases and stop HUD sessions                         |
 
 ## What's on the HUD?
 
@@ -115,13 +116,13 @@ Dir: ~/my-project | Session: abc12345 | CLI: 0.4.2
 ◐ codex_cli_explore 2m14s ↳2
 ```
 
-| Line | Shows |
-|------|-------|
-| **Header** | Model + effort, context bar, project, git branch, session timer |
+| Line            | Shows                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| **Header**      | Model + effort, context bar, project, git branch, session timer                                 |
 | **Environment** | Config count, MCP servers, enabled skills/hooks, instruction files, approval/sandbox, Fast mode |
-| **Tokens** | Total tokens with input/cache/output breakdown, context fill, compact count |
-| **Session** | Working directory, session ID, CLI version |
-| **Activity** | Running tool calls, recent tool history, and active subagents |
+| **Tokens**      | Total tokens with input/cache/output breakdown, context fill, compact count                     |
+| **Session**     | Working directory, session ID, CLI version                                                      |
+| **Activity**    | Running tool calls, recent tool history, and active subagents                                   |
 
 Approval is shown as `ask for approval`, `approve for me`, or `full access` from the
 latest Codex runtime permission state. If permission changes while Codex is running,
@@ -164,6 +165,7 @@ codex-hud --attach           # Attach to existing session
 codex-hud --new-session      # Force a new session
 codex-hud --self-check       # Run diagnostics
 ```
+
 </details>
 
 ### Update reminders
@@ -193,30 +195,30 @@ upgrade.
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CODEX_HUD_POSITION` | `bottom` | HUD pane position (`top` / `bottom`) |
-| `CODEX_HUD_HEIGHT` | 5 lines | HUD height in lines |
-| `CODEX_HUD_MOUSE` | `1` | Enable mouse/trackpad scrolling |
-| `CODEX_HUD_UPDATE_CHECK` | enabled | Check formal GitHub releases and offer a deferred update (`0`/`false` disables) |
+| Variable                 | Default  | Description                                                                     |
+| ------------------------ | -------- | ------------------------------------------------------------------------------- |
+| `CODEX_HUD_POSITION`     | `bottom` | HUD pane position (`top` / `bottom`)                                            |
+| `CODEX_HUD_HEIGHT`       | 5 lines  | HUD height in lines                                                             |
+| `CODEX_HUD_MOUSE`        | `1`      | Enable mouse/trackpad scrolling                                                 |
+| `CODEX_HUD_UPDATE_CHECK` | enabled  | Check formal GitHub releases and offer a deferred update (`0`/`false` disables) |
 
 <details>
 <summary>All environment variables</summary>
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CODEX_HUD_HEIGHT_AUTO` | `0` | Auto-adjust height based on width |
-| `CODEX_HUD_HEIGHT_MIN` | `CODEX_HUD_HEIGHT` | Min height in auto mode |
-| `CODEX_HUD_HEIGHT_MAX` | `12` | Max height in auto mode |
-| `CODEX_HUD_AUTO_ATTACH` | `0` | Auto-attach to latest session in same dir |
-| `CODEX_HUD_ALTERNATE_SCREEN` | `0` | tmux alternate-screen for codex pane |
-| `CODEX_HUD_CLEAR_SCROLLBACK` | `0` | Clear scrollback on first render |
-| `CODEX_HUD_BIND_TOGGLE` | `0` | Opt in to the legacy server-wide Prefix+H HUD toggle |
-| `CODEX_HUD_UPDATE_CHECK` | enabled | Check once per 12 hours for a newer stable GitHub Release; ask before scheduling an update after session exit |
-| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000` | Running-agent presentation timeout; positive safe integer milliseconds only |
-| `CODEX_HUD_CWD` | (unset) | Override working directory |
-| `CODEX_HOME` | `~/.codex` | Codex home directory |
-| `CODEX_SESSIONS_PATH` | (unset) | Override sessions directory |
+| Variable                                | Default            | Description                                                                                                   |
+| --------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `CODEX_HUD_HEIGHT_AUTO`                 | `0`                | Auto-adjust height based on width                                                                             |
+| `CODEX_HUD_HEIGHT_MIN`                  | `CODEX_HUD_HEIGHT` | Min height in auto mode                                                                                       |
+| `CODEX_HUD_HEIGHT_MAX`                  | `12`               | Max height in auto mode                                                                                       |
+| `CODEX_HUD_AUTO_ATTACH`                 | `0`                | Auto-attach to latest session in same dir                                                                     |
+| `CODEX_HUD_ALTERNATE_SCREEN`            | `0`                | tmux alternate-screen for codex pane                                                                          |
+| `CODEX_HUD_CLEAR_SCROLLBACK`            | `0`                | Clear scrollback on first render                                                                              |
+| `CODEX_HUD_BIND_TOGGLE`                 | `0`                | Opt in to the legacy server-wide Prefix+H HUD toggle                                                          |
+| `CODEX_HUD_UPDATE_CHECK`                | enabled            | Check once per 12 hours for a newer stable GitHub Release; ask before scheduling an update after session exit |
+| `CODEX_HUD_AGENT_INACTIVITY_TIMEOUT_MS` | `900000`           | Running-agent presentation timeout; positive safe integer milliseconds only                                   |
+| `CODEX_HUD_CWD`                         | (unset)            | Override working directory                                                                                    |
+| `CODEX_HOME`                            | `~/.codex`         | Codex home directory                                                                                          |
+| `CODEX_SESSIONS_PATH`                   | (unset)            | Override sessions directory                                                                                   |
 
 </details>
 
@@ -238,12 +240,12 @@ enabled = true
 
 ## System Support
 
-| Platform | Status |
-|----------|--------|
-| Linux | Supported |
-| macOS (Apple Silicon) | Supported |
-| macOS (Intel) | Testing pending |
-| Windows (WSL) | Supported on `feature/windows-support-dual-entry` |
+| Platform              | Status                                            |
+| --------------------- | ------------------------------------------------- |
+| Linux                 | Supported                                         |
+| macOS (Apple Silicon) | Supported                                         |
+| macOS (Intel)         | Testing pending                                   |
+| Windows (WSL)         | Supported on `feature/windows-support-dual-entry` |
 
 ## Development
 

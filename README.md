@@ -148,11 +148,9 @@ Compact mode shows `Agents: N`, where `N` counts all visible tracked agent nodes
 ## Usage
 
 ```bash
-codex                        # Launch with HUD
-codex --model gpt-5          # Pass any Codex CLI args
-codex "help me debug this"   # With prompt
-cx                           # Start the same HUD wrapper with a short command
+cx                           # Start the HUD wrapper (Codex CLI + Codex-HUD)
 codex-resume                 # Resume last session
+codex                        # Launch with native Codex CLI (no HUD)
 ```
 
 <details>
@@ -170,7 +168,7 @@ codex-hud --self-check       # Run diagnostics
 
 ### Update reminders
 
-Each new `codex`, `cx`, `codex-resume`, or direct `codex-hud` session checks the
+Each new `cx`, `codex-resume`, or direct `codex-hud` session checks the
 latest formal GitHub Release at most once every 12 hours. If a newer stable
 version is found, an interactive terminal shows:
 

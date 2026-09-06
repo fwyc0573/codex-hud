@@ -2,10 +2,12 @@
 
 Keeps codex CLI sessions alive across upstream capacity outages.
 
-When the model provider runs out of capacity, codex stops mid-task with:
+When the model provider runs out of capacity, or a stream ends because the servers are
+overloaded, codex stops mid-task with one of these messages:
 
 ```
 ⚠ Selected model is at capacity. Please try a different model.
+■ stream disconnected before completion: Our servers are currently overloaded. Please try again later.
 ```
 
 The session is not broken; it is waiting for someone to nudge it. `cx-continue` watches
@@ -103,7 +105,8 @@ daemon started was detected and retried within 1 second.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--interval SECONDS` | `1.0` | How often panes are inspected |
-| `--retry-interval SECONDS` | `5.0` | Minimum gap between injections into the same pane |
+| `--retry-interval SECONDS` | `5.0` | Minimum gap between capacity injections into the same pane |
+| `--stream-retry-interval SECONDS` | `2.0` | Minimum gap between overloaded-stream injections into the same pane |
 | `--retry-text TEXT` | `continue` | What gets submitted |
 | `--confirmations N` | `2` | Consecutive polls that must agree before injecting |
 | `--tail-lines N` | `12` | Trailing lines searched for the error |
@@ -154,5 +157,5 @@ tests/integration/fake_codex_tui.py # fake codex for e2e
 ## Known limits
 
 - codex must run inside tmux. A codex started in a bare terminal is invisible.
-- Only the capacity error is handled. Websocket drops and other transport stalls are
-  listed in `task_memory/task_2026-08-13_cx_continue/future.md`.
+- Only the recognized capacity and overloaded-stream messages are handled. Other
+  transport stalls remain listed in `task_memory/task_2026-08-13_cx_continue/future.md`.

@@ -18,13 +18,15 @@ CAPACITY_PATTERN = re.compile(r"Selected model is at capacity", re.IGNORECASE)
 # The retryable stream termination warning. Keep this exact enough to avoid treating
 # other websocket or transport disconnect reasons as a recoverable Codex stall.
 STREAM_DISCONNECTED_PATTERN = re.compile(
-    r"stream disconnected before completion:\s+stream closed before response\.completed",
+    r"(?:stream disconnected before completion:\s+stream closed before response\.completed|"
+    r"Our\s+servers\s+are\s+currently\s+overloaded\.\s+Please\s+try\s+again\s+later\.)",
     re.IGNORECASE,
 )
 
 # codex prints this inside the status line while a turn is in flight, e.g.
 # "Working (5m 05s | esc to interrupt)". Its presence means the session is healthy.
 WORKING_PATTERN = re.compile(r"esc to interrupt", re.IGNORECASE)
+COMPLETED_PATTERN = re.compile(r"(?:^|\s)[•·]\s*Completed\s+`[^`]+`", re.IGNORECASE)
 
 # The composer prompt marker. codex renders it as a bold "> " chevron.
 COMPOSER_MARKER = "›"
@@ -52,6 +54,7 @@ class PaneState:
     is_working: bool
     composer_empty: bool
     composer_found: bool
+    completed_after_stream_error: bool
 
     @property
     def should_retry(self) -> bool:
@@ -68,8 +71,7 @@ class PaneState:
         return (
             (self.has_capacity_error or self.has_stream_disconnected_error)
             and not self.is_working
-            and self.composer_found
-            and self.composer_empty
+            and ((self.composer_found and self.composer_empty) or self.completed_after_stream_error)
         )
 
 
@@ -191,6 +193,19 @@ def is_working(pane_text: str) -> bool:
     return bool(WORKING_PATTERN.search(strip_ansi(pane_text)))
 
 
+def completed_after_stream_error(pane_text: str, tail_lines: int = DEFAULT_TAIL_LINES) -> bool:
+    """Whether a completed tool line follows the stream error in the visible tail."""
+    lines = strip_ansi(pane_text).splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    window = lines[-tail_lines:] if tail_lines > 0 else lines
+    text = "\n".join(window)
+    error = STREAM_DISCONNECTED_PATTERN.search(text)
+    if error is None:
+        return False
+    return COMPLETED_PATTERN.search(text[error.end() :]) is not None
+
+
 def classify(pane_text: str, tail_lines: int = DEFAULT_TAIL_LINES) -> PaneState:
     """Classify a pane capture."""
     composer_found, composer_empty = find_composer(pane_text)
@@ -202,4 +217,7 @@ def classify(pane_text: str, tail_lines: int = DEFAULT_TAIL_LINES) -> PaneState:
         is_working=is_working(pane_text),
         composer_empty=composer_empty,
         composer_found=composer_found,
+        completed_after_stream_error=completed_after_stream_error(
+            pane_text, tail_lines=tail_lines
+        ),
     )

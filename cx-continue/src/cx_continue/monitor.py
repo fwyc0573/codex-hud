@@ -15,6 +15,7 @@ from .tmux import Pane
 LOGGER = logging.getLogger("cx_continue")
 
 DEFAULT_RETRY_INTERVAL = 5.0
+DEFAULT_STREAM_RETRY_INTERVAL = 2.0
 DEFAULT_RETRY_TEXT = "continue"
 
 
@@ -53,6 +54,7 @@ class Monitor:
 
     tmux_module: object
     retry_interval: float = DEFAULT_RETRY_INTERVAL
+    stream_retry_interval: float = DEFAULT_STREAM_RETRY_INTERVAL
     retry_text: str = DEFAULT_RETRY_TEXT
     tail_lines: int = detect.DEFAULT_TAIL_LINES
     confirmations: int = 2
@@ -127,14 +129,19 @@ class Monitor:
             )
             return None
 
+        retry_interval = (
+            self.stream_retry_interval
+            if state.has_stream_disconnected_error
+            else self.retry_interval
+        )
         if record.last_retry_at is not None:
             elapsed = now - record.last_retry_at
-            if elapsed < self.retry_interval:
+            if elapsed < retry_interval:
                 LOGGER.debug(
                     "%s stalled but throttled (%.1fs of %.1fs elapsed)",
                     pane,
                     elapsed,
-                    self.retry_interval,
+                    retry_interval,
                 )
                 return None
 

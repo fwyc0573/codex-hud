@@ -31,6 +31,10 @@ STREAM_DISCONNECTED_LINE = (
     "\x1b[38;5;1m■ stream disconnected before completion: "
     "stream closed before response.completed\x1b[39m"
 )
+OVERLOADED_STREAM_LINE = (
+    "\x1b[38;5;1m■ stream disconnected before completion: Our servers are currently "
+    "overloaded. Please try again later.\x1b[39m"
+)
 
 # Real empty composer: the placeholder hint is dim, and the background is set with a
 # truecolor escape whose second parameter is 2. That 2 is the truecolor selector, not the
@@ -97,6 +101,18 @@ class TestCapacityDetection:
 class TestStreamDisconnectedDetection:
     def test_detects_exact_stream_disconnected_error(self):
         assert detect.has_stream_disconnected_error(STREAM_DISCONNECTED_LINE) is True
+
+    def test_detects_overloaded_server_stream_error(self):
+        assert detect.has_stream_disconnected_error(OVERLOADED_STREAM_LINE) is True
+
+    def test_detects_overloaded_server_stream_error_wrapped_across_lines(self):
+        pane = "\n".join(
+            [
+                "■ stream disconnected before completion: Our servers are currently",
+                "overloaded. Please try again later.",
+            ]
+        )
+        assert detect.has_stream_disconnected_error(pane) is True
 
     def test_does_not_match_a_different_stream_disconnect_reason(self):
         pane = "stream disconnected before completion: websocket closed by server before response.completed"
@@ -175,6 +191,20 @@ class TestShouldRetry:
         state = detect.classify(pane)
         assert state.has_stream_disconnected_error is True
         assert state.should_retry is True
+
+    def test_completed_after_overload_retries_without_composer(self):
+        pane = (
+            "stream disconnected before completion: Our servers are currently overloaded. "
+            "Please try again later.\n• Completed `/root/dispatch_plan_extract`"
+        )
+        state = detect.classify(pane)
+        assert state.composer_found is False
+        assert state.completed_after_stream_error is True
+        assert state.should_retry is True
+
+    def test_missing_composer_without_completed_line_stays_safe(self):
+        pane = "stream disconnected before completion: Our servers are currently overloaded. Please try again later."
+        assert detect.classify(pane).should_retry is False
 
     def test_working_pane_never_retries(self):
         """A2: a healthy in-flight turn must never be interrupted."""

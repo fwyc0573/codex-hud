@@ -10,7 +10,12 @@ import time
 from logging.handlers import RotatingFileHandler
 
 from . import __version__, detect, tmux
-from .monitor import DEFAULT_RETRY_INTERVAL, DEFAULT_RETRY_TEXT, Monitor
+from .monitor import (
+    DEFAULT_RETRY_INTERVAL,
+    DEFAULT_RETRY_TEXT,
+    DEFAULT_STREAM_RETRY_INTERVAL,
+    Monitor,
+)
 
 DEFAULT_POLL_INTERVAL = 1.0
 LOG_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024
@@ -50,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "minimum gap between two injections into the same pane "
             f"(default: {DEFAULT_RETRY_INTERVAL}s)"
+        ),
+    )
+    parser.add_argument(
+        "--stream-retry-interval",
+        type=float,
+        default=DEFAULT_STREAM_RETRY_INTERVAL,
+        metavar="SECONDS",
+        help=(
+            "minimum gap between stream-disconnection recovery injections "
+            f"(default: {DEFAULT_STREAM_RETRY_INTERVAL}s)"
         ),
     )
     parser.add_argument(
@@ -162,10 +177,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.retry_interval <= 0:
         LOGGER.error("--retry-interval must be positive")
         return 2
+    if args.stream_retry_interval <= 0:
+        LOGGER.error("--stream-retry-interval must be positive")
+        return 2
 
     monitor = Monitor(
         tmux_module=tmux,
         retry_interval=args.retry_interval,
+        stream_retry_interval=args.stream_retry_interval,
         retry_text=args.retry_text,
         tail_lines=args.tail_lines,
         confirmations=max(1, args.confirmations),

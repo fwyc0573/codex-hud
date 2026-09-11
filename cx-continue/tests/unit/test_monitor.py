@@ -27,6 +27,10 @@ OVERLOADED_STREAM_LINE = (
     "\x1b[38;5;1m■ stream disconnected before completion: Our servers are currently "
     "overloaded. Please try again later.\x1b[39m"
 )
+TRANSPORT_DECODING_STREAM_LINE = (
+    "\x1b[38;5;1m■ stream disconnected before completion: Transport error: "
+    "network error: error decoding response body\x1b[39m"
+)
 EMPTY_COMPOSER = (
     "\x1b[1m›\x1b[0m\x1b[48;2;49;50;51m \x1b[2mRun /review on my current changes\x1b[0m"
 )
@@ -36,6 +40,9 @@ WORKING_LINE = "• \x1b[2mWorkin\x1b[0mg \x1b[2m(1m 35s • esc to interrupt)\x
 STALLED_PANE = "\n".join([CAPACITY_LINE, "", EMPTY_COMPOSER])
 STREAM_DISCONNECTED_PANE = "\n".join([STREAM_DISCONNECTED_LINE, "", EMPTY_COMPOSER])
 OVERLOADED_STREAM_PANE = "\n".join([OVERLOADED_STREAM_LINE, "", EMPTY_COMPOSER])
+TRANSPORT_DECODING_STREAM_PANE = "\n".join(
+    [TRANSPORT_DECODING_STREAM_LINE, "", EMPTY_COMPOSER]
+)
 OVERLOADED_COMPLETED_PANE = "\n".join(
     [
         "stream disconnected before completion: Our servers are currently overloaded. Please try again later.",
@@ -112,6 +119,21 @@ class TestBasicRetry:
 
         assert len(monitor.tick(now=0.0)) == 1
         assert fake.sent == [("%1", "continue")]
+
+    def test_injects_continue_into_transport_decoding_stream_pane(self):
+        fake = FakeTmux([PANE_A], {"%1": TRANSPORT_DECODING_STREAM_PANE})
+        monitor = make_monitor(fake)
+
+        assert len(monitor.tick(now=0.0)) == 1
+        assert fake.sent == [("%1", "continue")]
+
+    def test_transport_decoding_stream_retries_after_two_seconds(self):
+        fake = FakeTmux([PANE_A], {"%1": TRANSPORT_DECODING_STREAM_PANE})
+        monitor = make_monitor(fake)
+
+        monitor.tick(now=0.0)
+        assert monitor.tick(now=1.9) == []
+        assert len(monitor.tick(now=2.0)) == 1
 
     def test_overloaded_stream_retries_after_two_seconds(self):
         fake = FakeTmux([PANE_A], {"%1": OVERLOADED_STREAM_PANE})

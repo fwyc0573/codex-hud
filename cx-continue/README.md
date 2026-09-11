@@ -3,11 +3,13 @@
 Keeps codex CLI sessions alive across upstream capacity outages.
 
 When the model provider runs out of capacity, or a stream ends because the servers are
-overloaded, codex stops mid-task with one of these messages:
+overloaded or a transport decoding error interrupts the response, codex stops mid-task
+with one of these messages:
 
 ```
 ⚠ Selected model is at capacity. Please try a different model.
 ■ stream disconnected before completion: Our servers are currently overloaded. Please try again later.
+■ stream disconnected before completion: Transport error: network error: error decoding response body
 ```
 
 The session is not broken; it is waiting for someone to nudge it. `cx-continue` watches
@@ -32,7 +34,7 @@ A retry fires only when all three hold:
 
 | Signal | Why it matters |
 |--------|----------------|
-| The capacity error is near the bottom of the pane | An error still sitting in scrollback from an hour ago is not a reason to retry |
+| A retryable error is near the bottom of the pane | An error still sitting in scrollback from an hour ago is not a reason to retry |
 | `esc to interrupt` is absent | Its presence means a turn is in flight; interrupting healthy work is worse than doing nothing |
 | The composer is empty | Injecting into a composer that holds your half-written prompt would submit `your textcontinue` |
 
@@ -106,7 +108,7 @@ daemon started was detected and retried within 1 second.
 |------|---------|---------|
 | `--interval SECONDS` | `1.0` | How often panes are inspected |
 | `--retry-interval SECONDS` | `5.0` | Minimum gap between capacity injections into the same pane |
-| `--stream-retry-interval SECONDS` | `2.0` | Minimum gap between overloaded-stream injections into the same pane |
+| `--stream-retry-interval SECONDS` | `2.0` | Minimum gap between stream-disconnection injections into the same pane |
 | `--retry-text TEXT` | `continue` | What gets submitted |
 | `--confirmations N` | `2` | Consecutive polls that must agree before injecting |
 | `--tail-lines N` | `12` | Trailing lines searched for the error |
@@ -157,5 +159,6 @@ tests/integration/fake_codex_tui.py # fake codex for e2e
 ## Known limits
 
 - codex must run inside tmux. A codex started in a bare terminal is invisible.
-- Only the recognized capacity and overloaded-stream messages are handled. Other
-  transport stalls remain listed in `task_memory/task_2026-08-13_cx_continue/future.md`.
+- Only the recognized capacity, overloaded-stream, and transport-decoding-stream
+  messages are handled. Other transport stalls, such as websocket closed by server,
+  remain unmatched.

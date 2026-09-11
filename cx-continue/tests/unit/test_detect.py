@@ -35,6 +35,10 @@ OVERLOADED_STREAM_LINE = (
     "\x1b[38;5;1m■ stream disconnected before completion: Our servers are currently "
     "overloaded. Please try again later.\x1b[39m"
 )
+TRANSPORT_DECODING_STREAM_LINE = (
+    "\x1b[38;5;1m■ stream disconnected before completion: Transport error: "
+    "network error: error decoding response body\x1b[39m"
+)
 
 # Real empty composer: the placeholder hint is dim, and the background is set with a
 # truecolor escape whose second parameter is 2. That 2 is the truecolor selector, not the
@@ -110,6 +114,18 @@ class TestStreamDisconnectedDetection:
             [
                 "■ stream disconnected before completion: Our servers are currently",
                 "overloaded. Please try again later.",
+            ]
+        )
+        assert detect.has_stream_disconnected_error(pane) is True
+
+    def test_detects_transport_decoding_stream_error(self):
+        assert detect.has_stream_disconnected_error(TRANSPORT_DECODING_STREAM_LINE) is True
+
+    def test_detects_transport_decoding_stream_error_wrapped_across_lines(self):
+        pane = "\n".join(
+            [
+                "■ stream disconnected before completion: Transport error: network",
+                "error: error decoding response body",
             ]
         )
         assert detect.has_stream_disconnected_error(pane) is True
@@ -190,6 +206,16 @@ class TestShouldRetry:
         pane = "\n".join([STREAM_DISCONNECTED_LINE, "", EMPTY_COMPOSER, "", STATUS_LINE])
         state = detect.classify(pane)
         assert state.has_stream_disconnected_error is True
+        assert state.should_retry is True
+
+    def test_transport_decoding_stream_pane_retries(self):
+        pane = "\n".join(
+            [TRANSPORT_DECODING_STREAM_LINE, "", EMPTY_COMPOSER, "", STATUS_LINE]
+        )
+        state = detect.classify(pane)
+        assert state.has_stream_disconnected_error is True
+        assert state.is_working is False
+        assert state.composer_empty is True
         assert state.should_retry is True
 
     def test_completed_after_overload_retries_without_composer(self):

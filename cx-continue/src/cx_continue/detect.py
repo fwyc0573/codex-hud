@@ -18,8 +18,13 @@ CAPACITY_PATTERN = re.compile(r"Selected model is at capacity", re.IGNORECASE)
 # The retryable stream termination warning. Keep this exact enough to avoid treating
 # other websocket or transport disconnect reasons as a recoverable Codex stall.
 STREAM_DISCONNECTED_PATTERN = re.compile(
-    r"(?:stream disconnected before completion:\s+stream closed before response\.completed|"
-    r"Our\s+servers\s+are\s+currently\s+overloaded\.\s+Please\s+try\s+again\s+later\.)",
+    r"(?:"
+    r"stream disconnected before completion:\s+"
+    r"(?:stream closed before response\.completed|"
+    r"Transport\s+error:\s+network\s+error:\s+error\s+decoding\s+response\s+body)"
+    r"|"
+    r"Our\s+servers\s+are\s+currently\s+overloaded\.\s+Please\s+try\s+again\s+later\."
+    r")",
     re.IGNORECASE,
 )
 

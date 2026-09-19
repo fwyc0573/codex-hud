@@ -729,8 +729,18 @@ prepare_sqlite_home() {
 
 launch_environment_prefix() {
     local prefix=""
+    local effective_home=""
+    # StepCode supplies a managed home through CODEX_HOME_OVERRIDE. Native
+    # launches have no suffix, so the wrapper CODEX_HOME must be copied onto
+    # the pane command; an already-running tmux server will otherwise keep a
+    # different home for the Codex process.
     if [[ -n "$CODEX_HOME_OVERRIDE" ]]; then
-        prefix="CODEX_HOME=$(shell_quote "$CODEX_HOME_OVERRIDE") "
+        effective_home="$CODEX_HOME_OVERRIDE"
+    elif [[ -n "${CODEX_HOME:-}" ]]; then
+        effective_home="$CODEX_HOME"
+    fi
+    if [[ -n "$effective_home" ]]; then
+        prefix="CODEX_HOME=$(shell_quote "$effective_home") "
     fi
     if [[ -n "$CODEX_SESSIONS_OVERRIDE" ]]; then
         prefix="${prefix}CODEX_SESSIONS_PATH=$(shell_quote "$CODEX_SESSIONS_OVERRIDE") "
@@ -1358,6 +1368,7 @@ Options:
   --stepcode          Launch StepCode Codex through \`stepcode codex\`
 
 Environment Variables:
+  CODEX_HOME          Forwarded into the tmux pane for native launches; StepCode still uses its managed home
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
   CODEX_HUD_HEIGHT    HUD pane height in lines (default: 5)
   CODEX_HUD_HEIGHT_AUTO Auto-adjust HUD height based on pane width (default: 0)

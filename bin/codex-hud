@@ -589,7 +589,9 @@ resolve_launch_command() {
         executable="${!LAUNCH_PROFILE_CLI_ENV}"
     fi
 
-    if [[ -n "$LAUNCH_PROFILE_CODEX_HOME_SUFFIX" ]]; then
+    if [[ "$LAUNCH_PROFILE" == "stepcode" && -n "${STEPCODE_CODEX_HOME:-}" ]]; then
+        CODEX_HOME_OVERRIDE="$STEPCODE_CODEX_HOME"
+    elif [[ -n "$LAUNCH_PROFILE_CODEX_HOME_SUFFIX" ]]; then
         if [[ -z "${HOME:-}" ]]; then
             error "HOME is required for the selected Codex launch profile."
         fi
@@ -597,7 +599,9 @@ resolve_launch_command() {
     else
         CODEX_HOME_OVERRIDE=""
     fi
-    if [[ -n "$LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX" ]]; then
+    if [[ "$LAUNCH_PROFILE" == "stepcode" && -n "${STEPCODE_CODEX_SESSIONS_PATH:-}" ]]; then
+        CODEX_SESSIONS_OVERRIDE="$STEPCODE_CODEX_SESSIONS_PATH"
+    elif [[ -n "$LAUNCH_PROFILE_CODEX_SESSIONS_SUFFIX" ]]; then
         if [[ -z "${HOME:-}" ]]; then
             error "HOME is required for the selected Codex launch profile."
         fi

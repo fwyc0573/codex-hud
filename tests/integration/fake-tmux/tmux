@@ -126,6 +126,9 @@ case "$cmd" in
     ;;
   resize-pane)
     append_log "resize-pane $*"
+    if [[ -n "${TMUX_RESIZE_DELAY:-}" ]]; then
+      sleep "$TMUX_RESIZE_DELAY"
+    fi
     while [[ "${1:-}" != "" ]]; do
       if [[ "$1" == "-y" ]]; then
         shift

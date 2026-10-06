@@ -86,6 +86,20 @@ run_case() {
     cat "$log_file" >&2
     exit 1
   fi
+
+  if ! grep -q "^set-hook -t .* -u client-resized$" "$log_file" ||
+     ! grep -q "^set-hook -t .* -u after-resize-pane$" "$log_file"; then
+    echo "Expected legacy resize hooks to be removed before reconfiguration, log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+
+  if ! grep -q "^set-hook -t .* client-resized run-shell -b " "$log_file" ||
+     ! grep -q "^set-hook -t .* after-resize-pane run-shell -b " "$log_file"; then
+    echo "Expected resize hooks to run asynchronously, log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
 }
 
 run_case default 5 ""

@@ -95,4 +95,56 @@ run_case 70 5 "" "" "0" "0" "%1"
 # If stored main pane is stale, fallback still finds and focuses the real main pane.
 run_case 70 5 "" "" "0" "1" "%9"
 
+run_concurrency_case() {
+  local test_root
+  local log_file
+  local first_pid
+  local resize_count
+
+  test_root="$(mktemp -d)"
+  log_file="$test_root/tmux.log"
+
+  export XDG_RUNTIME_DIR="$test_root"
+  export TMUX_LOG_FILE="$log_file"
+  export TMUX_MAIN_PANE_ID="%1"
+  export TMUX_STORED_MAIN_PANE="%1"
+  export TMUX_PANE_ID="%2"
+  export TMUX_PANES=$'%1\n%2'
+  export TMUX_BASE_HEIGHT="5"
+  export TMUX_HEIGHT="5"
+  export TMUX_AUTO="0"
+  export TMUX_HEIGHT_MIN="5"
+  export TMUX_HEIGHT_MAX="12"
+  export TMUX_PANE_WIDTH="120"
+  export TMUX_PANE_HEIGHT="45"
+  export TMUX_MAIN_PANE_IN_MODE="0"
+  export TMUX_FOCUS_MAIN="1"
+  export TMUX_RESIZE_DELAY="1"
+
+  "$ROOT_DIR/bin/codex-hud-resize" "session-lock" &
+  first_pid=$!
+
+  for _ in {1..40}; do
+    if grep -q "^resize-pane " "$log_file" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+
+  "$ROOT_DIR/bin/codex-hud-resize" "session-lock"
+  wait "$first_pid"
+
+  resize_count="$(grep -c "^resize-pane " "$log_file" || true)"
+  if [[ "$resize_count" != "1" ]]; then
+    echo "Expected one serialized resize, got $resize_count; log:" >&2
+    cat "$log_file" >&2
+    exit 1
+  fi
+
+  unset TMUX_RESIZE_DELAY
+  rm -rf "$test_root"
+}
+
+run_concurrency_case
+
 echo "test-hud-resize: PASS"

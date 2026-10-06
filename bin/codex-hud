@@ -1018,6 +1018,8 @@ set_fixed_hud_height() {
     fi
 
     if [[ -x "$resize_helper" ]]; then
+        tmux set-hook -t "$session_name" -u client-resized 2>/dev/null || true
+        tmux set-hook -t "$session_name" -u after-resize-pane 2>/dev/null || true
         "$resize_helper" "$session_name"
     else
         tmux resize-pane -t "$hud_pane_id" -y "$height" 2>/dev/null || true
@@ -1025,7 +1027,7 @@ set_fixed_hud_height() {
 
     local hook_cmd
     if [[ -x "$resize_helper" ]]; then
-        hook_cmd="run-shell \"$resize_helper #{session_name}\""
+        hook_cmd="run-shell -b \"$resize_helper #{session_name}\""
         tmux set-hook -t "$session_name" client-resized "$hook_cmd"
         tmux set-hook -t "$session_name" after-resize-pane "$hook_cmd"
     fi

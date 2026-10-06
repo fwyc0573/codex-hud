@@ -11,6 +11,24 @@ if [[ -z "$session_name" ]]; then
     exit 0
 fi
 
+lock_dir="${XDG_RUNTIME_DIR:-/tmp}"
+if [[ ! -d "$lock_dir" || ! -w "$lock_dir" ]]; then
+    lock_dir="/tmp"
+fi
+lock_session="${session_name//[^a-zA-Z0-9_.-]/_}"
+
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$lock_dir/codex-hud-resize-${UID}-${lock_session}.lock"
+    flock -n 9 || exit 0
+else
+    lock_path="$lock_dir/codex-hud-resize-${UID}-${lock_session}.lockdir"
+    mkdir "$lock_path" 2>/dev/null || exit 0
+    cleanup_lock() {
+        rmdir "$lock_path" 2>/dev/null || true
+    }
+    trap cleanup_lock EXIT
+fi
+
 pane=$(tmux show-option -t "$session_name" -qv @codex_hud_pane)
 base_height=$(tmux show-option -t "$session_name" -qv @codex_hud_base_height)
 height=$(tmux show-option -t "$session_name" -qv @codex_hud_height)
